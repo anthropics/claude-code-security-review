@@ -5,7 +5,7 @@ Constants and configuration values for ClaudeCode.
 import os
 
 # API Configuration
-DEFAULT_CLAUDE_MODEL = os.environ.get('CLAUDE_MODEL') or 'claude-opus-4-20250514'
+DEFAULT_CLAUDE_MODEL = os.environ.get('CLAUDE_MODEL') or 'claude-opus-4-1-20250805'
 DEFAULT_TIMEOUT_SECONDS = 180  # 3 minutes
 DEFAULT_MAX_RETRIES = 3
 RATE_LIMIT_BACKOFF_MAX = 30  # Maximum backoff time for rate limits
