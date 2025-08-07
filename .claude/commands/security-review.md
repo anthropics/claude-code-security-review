@@ -78,6 +78,7 @@ SECURITY CATEGORIES TO EXAMINE:
 **Data Exposure:**
 - Sensitive data logging or storage
 - PII handling violations
+- PII sharing with third-party services or external APIs
 - API endpoint data leakage
 - Debug information exposure
 
