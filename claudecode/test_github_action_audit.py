@@ -210,6 +210,59 @@ class TestPromptsModule:
         assert 'test.py' in prompt
 
 
+class TestPermissionRestrictions:
+    """Test permission restrictions for Claude Code CLI."""
+    
+    def test_default_allowed_tools(self):
+        """Test that default allowed tools are set when ALLOWED_TOOLS is not specified."""
+        import os
+        from unittest.mock import patch, MagicMock
+        from claudecode.github_action_audit import SimpleClaudeRunner
+        from pathlib import Path
+        
+        with patch.dict(os.environ, {}, clear=True):
+            runner = SimpleClaudeRunner()
+            
+            mock_result = MagicMock()
+            mock_result.returncode = 0
+            mock_result.stdout = '{"result": "{\\"findings\\": []}"}'
+            
+            with patch('subprocess.run', return_value=mock_result) as mock_run:
+                runner.run_security_audit(Path('.'), 'test prompt')
+                cmd = mock_run.call_args[0][0]
+                
+                # Verify --allowedTools flag is present with default tools
+                assert '--allowedTools' in cmd
+                idx = cmd.index('--allowedTools')
+                tools_string = cmd[idx + 1]
+                assert 'Read' in tools_string
+                assert 'Bash(git diff:*)' in tools_string
+    
+    def test_custom_allowed_tools(self):
+        """Test that custom allowed tools override defaults."""
+        import os
+        from unittest.mock import patch, MagicMock
+        from claudecode.github_action_audit import SimpleClaudeRunner
+        from pathlib import Path
+        
+        with patch.dict(os.environ, {'ALLOWED_TOOLS': 'Read,Grep'}):
+            runner = SimpleClaudeRunner()
+            
+            mock_result = MagicMock()
+            mock_result.returncode = 0
+            mock_result.stdout = '{"result": "{\\"findings\\": []}"}'
+            
+            with patch('subprocess.run', return_value=mock_result) as mock_run:
+                runner.run_security_audit(Path('.'), 'test prompt')
+                cmd = mock_run.call_args[0][0]
+                
+                # Verify only custom tools are present
+                idx = cmd.index('--allowedTools')
+                tools_string = cmd[idx + 1]
+                assert tools_string == 'Read,Grep'
+                assert 'Bash(git diff:*)' not in tools_string  # Default tool not included
+
+
 class TestDeploymentPRDetection:
     """Test deployment PR title pattern matching."""
     

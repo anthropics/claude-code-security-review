@@ -227,6 +227,15 @@ class SimpleClaudeRunner:
                 '--model', DEFAULT_CLAUDE_MODEL
             ]
             
+            # Add allowed tools if specified
+            allowed_tools = os.environ.get('ALLOWED_TOOLS', '').strip()
+            if not allowed_tools:
+                # Default read-only tools for security scanning
+                allowed_tools = 'Read,Glob,Grep,LS,Task,Bash(git diff:*),Bash(git status:*),Bash(git log:*),Bash(git show:*),Bash(git remote show:*)'
+            
+            # Claude CLI handles comma-separated list directly
+            cmd.extend(['--allowedTools', allowed_tools])
+            
             # Run Claude Code with retry logic
             NUM_RETRIES = 3
             for attempt in range(NUM_RETRIES):
