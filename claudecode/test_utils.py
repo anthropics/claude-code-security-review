@@ -26,7 +26,7 @@ from .platform_utils import PlatformAdapter, get_platform_adapter
 logger = get_logger(__name__)
 
 
-class TestEnvironment:
+class EnvironmentManager:
     """
     Manages test environment setup and teardown.
     
@@ -488,7 +488,7 @@ def measure_test_performance(test_func: Callable) -> Dict[str, Any]:
     }
 
 
-class TestReporter:
+class ReportingUtils:
     """
     Test result reporting and analysis utilities.
     """
