@@ -157,6 +157,27 @@ cd claude-code-security-review
 pytest claudecode -v
 ```
 
+## Windows setup
+
+To run the Claude Code Security Review on Windows:
+
+1. Install Node.js (v18 or later) and npm:
+  - Download from https://nodejs.org or use nvm-windows.
+2. Install the Claude CLI:npm install -g @anthropic-ai/claude-code
+
+3. Add npm global directory to PATH:$npmPath = npm config get prefix
+[Environment]::SetEnvironmentVariable("Path", [Environment]::GetEnvironmentVariable("Path", "User") + ";$npmPath", "User")
+
+4. Set PowerShell execution policy:Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned
+5. Verify installation:claude --version
+
+Expected output: 1.0.71 (Claude Code) or similar.
+
+Troubleshooting
+
+Claude CLI not found: Ensure claude.ps1 or claude.cmd is in PATH and execution policy is RemoteSigned.
+Test failures: Verify npm is installed and check logs in github_action_audit.py for errors.
+
 ## Support
 
 For issues or questions:
