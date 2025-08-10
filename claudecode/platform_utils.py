@@ -340,6 +340,55 @@ class PlatformAdapter:
             error_msg = f"Failed to check Claude Code: {str(e)}"
             logger.error(error_msg)
             return False, error_msg
+    
+    # Windows-specific cleanup methods
+    def safe_rmtree(self, path: str, ignore_errors: bool = True) -> bool:
+        """
+        Platform-aware safe directory removal.
+        
+        Uses Windows-specific cleanup on Windows, standard rmtree elsewhere.
+        """
+        if not self._is_windows:
+            # Unix-like systems: use standard removal
+            try:
+                shutil.rmtree(path)
+                return True
+            except Exception as e:
+                logger.warning(f"Standard rmtree failed for {path}: {e}")
+                if ignore_errors:
+                    return False
+                raise
+        else:
+            # Windows: use specialized cleanup
+            try:
+                from .windows_cleanup import safe_windows_rmtree
+                return safe_windows_rmtree(path, ignore_errors=ignore_errors)
+            except ImportError:
+                logger.warning("Windows cleanup module not available, falling back to standard rmtree")
+                try:
+                    shutil.rmtree(path)
+                    return True
+                except Exception as e:
+                    logger.warning(f"Fallback rmtree failed for {path}: {e}")
+                    if ignore_errors:
+                        return False
+                    raise
+    
+    def create_safe_tempdir(self, prefix: str = "claude_temp_") -> str:
+        """Create temporary directory with platform-appropriate handling."""
+        if not self._is_windows:
+            # Unix-like systems: use standard temporary directory
+            import tempfile
+            return tempfile.mkdtemp(prefix=prefix)
+        else:
+            # Windows: use specialized temporary directory creation
+            try:
+                from .windows_cleanup import create_safe_tempdir
+                return create_safe_tempdir(prefix=prefix)
+            except ImportError:
+                logger.warning("Windows cleanup module not available, using standard tempdir")
+                import tempfile
+                return tempfile.mkdtemp(prefix=prefix)
 
 
 # Global platform adapter instance
@@ -375,3 +424,34 @@ def run_claude_subprocess(args: List[str], **kwargs) -> subprocess.CompletedProc
         subprocess.CompletedProcess result
     """
     return _platform_adapter.run_claude_command(args, **kwargs)
+
+
+def safe_rmtree(path: str, ignore_errors: bool = True) -> bool:
+    """
+    Platform-aware safe directory removal.
+    
+    Convenience function that uses the platform adapter for safe cleanup.
+    
+    Args:
+        path: Directory path to remove
+        ignore_errors: If True, suppress errors and return False on failure
+        
+    Returns:
+        True if removal succeeded, False if failed and ignore_errors=True
+    """
+    return _platform_adapter.safe_rmtree(path, ignore_errors=ignore_errors)
+
+
+def create_safe_tempdir(prefix: str = "claude_temp_") -> str:
+    """
+    Create a temporary directory with platform-appropriate cleanup handling.
+    
+    Convenience function that uses the platform adapter.
+    
+    Args:
+        prefix: Prefix for the temporary directory name
+        
+    Returns:
+        Path to the created temporary directory
+    """
+    return _platform_adapter.create_safe_tempdir(prefix=prefix)
