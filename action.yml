@@ -29,7 +29,7 @@ inputs:
     default: ''
 
   claude-model:
-    description: 'Claude model to use for security analysis (e.g., claude-3-sonnet-20240229)'
+    description: 'Claude model to use for security analysis (e.g., claude-sonnet-4-20250514)'
     required: false
     default: ''
 
