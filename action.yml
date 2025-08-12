@@ -188,6 +188,16 @@ runs:
           echo "ClaudeCode only runs on pull requests, skipping"
           exit 0
         fi
+        
+        # Validate API key is provided
+        if [ -z "$ANTHROPIC_API_KEY" ]; then
+          echo "::error::ANTHROPIC_API_KEY is not set. Please provide the claude-api-key input to the action."
+          echo "Example usage:"
+          echo "  - uses: anthropics/claude-code-security-reviewer@main"
+          echo "    with:"
+          echo "      claude-api-key: \$\{{ secrets.ANTHROPIC_API_KEY }}"
+          exit 1
+        fi
                 
         # Set timeout
         export CLAUDE_TIMEOUT="${{ inputs.claudecode-timeout }}"
