@@ -166,7 +166,9 @@ class TestSimpleClaudeRunner:
         assert call_args[0][0] == [
             'claude',
             '--output-format', 'json',
-            '--model', DEFAULT_CLAUDE_MODEL
+            '--model', DEFAULT_CLAUDE_MODEL,
+            '--allowedTools',
+            'Read,Glob,Grep,LS,Task,Bash(git diff:*),Bash(git status:*),Bash(git log:*),Bash(git show:*),Bash(git remote show:*)'
         ]
         assert call_args[1]['input'] == 'test prompt'
         assert call_args[1]['cwd'] == Path('/tmp/test')
