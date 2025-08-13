@@ -48,6 +48,11 @@ inputs:
     required: false
     default: ''
 
+  allowed-tools:
+    description: 'Comma-separated list of tools Claude Code is allowed to use (e.g., "Read,Grep,LS,Bash(git diff:*),Bash(git status:*)"). If not specified, uses default read-only tools for security scanning.'
+    required: false
+    default: ''
+
 outputs:
   findings-count:
     description: 'Number of security findings'
@@ -175,6 +180,7 @@ runs:
         FALSE_POSITIVE_FILTERING_INSTRUCTIONS: ${{ inputs.false-positive-filtering-instructions }}
         CUSTOM_SECURITY_SCAN_INSTRUCTIONS: ${{ inputs.custom-security-scan-instructions }}
         CLAUDE_MODEL: ${{ inputs.claude-model }}
+        ALLOWED_TOOLS: ${{ inputs.allowed-tools }}
       run: |
         echo "Running ClaudeCode AI security analysis..."
         echo "----------------------------------------"

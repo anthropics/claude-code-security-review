@@ -54,6 +54,23 @@ jobs:
 | `run-every-commit` | Run ClaudeCode on every commit (skips cache check). Warning: May increase false positives on PRs with many commits. | `false` | No |
 | `false-positive-filtering-instructions` | Path to custom false positive filtering instructions text file | None | No |
 | `custom-security-scan-instructions` | Path to custom security scan instructions text file to append to audit prompt | None | No |
+| `allowed-tools` | Comma-separated list of tools Claude Code can use (e.g., `"Read,Grep,LS,Bash(git diff:*)"`). If not specified, uses default read-only tools. | See below | No |
+
+#### Default Allowed Tools
+
+When `allowed-tools` is not specified, the action uses these read-only tools by default:
+- `Read` - Read file contents
+- `Glob` - Search for files by pattern
+- `Grep` - Search file contents
+- `LS` - List directory contents
+- `Task` - Create subtasks for analysis
+- `Bash(git diff:*)` - View git diffs
+- `Bash(git status:*)` - Check git status
+- `Bash(git log:*)` - View git history
+- `Bash(git show:*)` - Show git objects
+- `Bash(git remote show:*)` - Show remote information
+
+These defaults ensure Claude Code can analyze code without making any modifications.
 
 ### Action Outputs
 
