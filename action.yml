@@ -31,7 +31,7 @@ inputs:
   claude-model:
     description: 'Claude model to use for security analysis (e.g., claude-3-sonnet-20240229)'
     required: false
-    default: ''
+    default: 'claude-sonnet-4-20250514'
 
   run-every-commit:
     description: 'Run ClaudeCode on every commit (skips cache check). Warning: This may lead to more false positives on PRs with many commits as the AI analyzes the same code multiple times.'
