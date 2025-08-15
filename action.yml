@@ -308,6 +308,8 @@ runs:
       if: always()
       shell: bash
       run: gh cache delete claudecode-${{ github.repository_id }}-pr-${{ github.event.pull_request.number }}-${{ github.sha }}
+      env:
+        GH_TOKEN: ${{ github.token }}
 
 branding:
   icon: 'shield'
