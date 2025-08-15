@@ -310,6 +310,7 @@ runs:
       run: gh cache delete --repo ${{ github.repository }} claudecode-${{ github.repository_id }}-pr-${{ github.event.pull_request.number }}-${{ github.sha }}
       env:
         GH_TOKEN: ${{ github.token }}
+      continue-on-error: true
 
 branding:
   icon: 'shield'
