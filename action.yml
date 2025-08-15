@@ -307,7 +307,7 @@ runs:
     - name: Remove lock-related actions cache
       if: always()
       shell: bash
-      run: gh cache delete claudecode-${{ github.repository_id }}-pr-${{ github.event.pull_request.number }}-${{ github.sha }}
+      run: gh cache delete --repo ${{ github.repository }} claudecode-${{ github.repository_id }}-pr-${{ github.event.pull_request.number }}-${{ github.sha }}
       env:
         GH_TOKEN: ${{ github.token }}
 
