@@ -25,8 +25,12 @@ inputs:
   
   claude-api-key:
     description: 'Anthropic Claude API key for security analysis'
-    required: true
+    required: false
     default: ''
+
+  claude-code-oauth-token:
+    description: "Claude Code OAuth token (alternative to claude-api-key)"
+    required: false
 
   claude-model:
     description: 'Claude model to use for security analysis (e.g., claude-sonnet-4-20250514)'
@@ -182,6 +186,7 @@ runs:
         GITHUB_REPOSITORY: ${{ github.repository }}
         PR_NUMBER: ${{ github.event.pull_request.number }}
         ANTHROPIC_API_KEY: ${{ inputs.claude-api-key }}
+        CLAUDE_CODE_OAUTH_TOKEN: ${{ inputs.claude-code-oauth-token }}
         ENABLE_CLAUDE_FILTERING: 'true' 
         EXCLUDE_DIRECTORIES: ${{ inputs.exclude-directories }}
         FALSE_POSITIVE_FILTERING_INSTRUCTIONS: ${{ inputs.false-positive-filtering-instructions }}
@@ -226,6 +231,7 @@ runs:
         echo "Python version: $(python --version)"
         echo "Claude CLI version: $(claude --version 2>&1 || echo 'Claude CLI not found')"
         echo "ANTHROPIC_API_KEY set: $(if [ -n "$ANTHROPIC_API_KEY" ]; then echo 'Yes'; else echo 'No'; fi)"
+        echo "CLAUDE_CODE_OAUTH_TOKEN set: $(if [ -n "CLAUDE_CODE_OAUTH_TOKEN" ]; then echo 'Yes'; else echo 'No'; fi)"
         echo "GITHUB_REPOSITORY: $GITHUB_REPOSITORY"
         echo "PR_NUMBER: $PR_NUMBER"
         echo "Python path: $PYTHONPATH"
