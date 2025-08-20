@@ -15,6 +15,14 @@ from claudecode.github_action_audit import (
     main
 )
 
+# Auto-apply Windows compatibility patches if needed
+try:
+    from claudecode.windows_patches import auto_patch_if_needed
+    auto_patch_if_needed()
+except ImportError:
+    # Windows patches not available, continue normally
+    pass
+
 __all__ = [
     "GitHubActionClient",
     "SimpleClaudeRunner",
