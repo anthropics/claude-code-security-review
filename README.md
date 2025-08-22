@@ -46,7 +46,7 @@ jobs:
 
 | Input | Description | Default | Required |
 |-------|-------------|---------|----------|
-| `claude-api-key` | Anthropic Claude API key for security analysis | None | Yes |
+| `claude-api-key` | Anthropic Claude API key for security analysis. <br>*Note*: This API key needs to be enabled for both the Claude API and Claude Code usage. | None | Yes |
 | `comment-pr` | Whether to comment on PRs with findings | `true` | No |
 | `upload-results` | Whether to upload results as artifacts | `true` | No |
 | `exclude-directories` | Comma-separated list of directories to exclude from scanning | None | No |
