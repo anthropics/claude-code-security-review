@@ -36,7 +36,7 @@ inputs:
   run-every-commit:
     description: 'Run ClaudeCode on every commit (skips cache check). Warning: This may lead to more false positives on PRs with many commits as the AI analyzes the same code multiple times.'
     required: false
-    default: 'false'
+    default: 'true'
 
   false-positive-filtering-instructions:
     description: 'Path to custom false positive filtering instructions text file'
@@ -47,6 +47,11 @@ inputs:
     description: 'Path to custom security scan instructions text file to append to audit prompt'
     required: false
     default: ''
+
+  refresh-comments:
+    description: 'Whether to refresh security comments on new commits (delete old security comments and post new results)'
+    required: false
+    default: 'true'
 
 outputs:
   findings-count:
@@ -301,6 +306,7 @@ runs:
         GITHUB_TOKEN: ${{ github.token }}
         CLAUDECODE_FINDINGS: ${{ steps.claudecode-scan.outputs.findings_count }}
         SILENCE_CLAUDECODE_COMMENTS: ${{ steps.claudecode-check.outputs.silence_claudecode_comments }}
+        REFRESH_COMMENTS: ${{ inputs.refresh-comments }}
       run: |
         node ${{ github.action_path }}/scripts/comment-pr-findings.js
 

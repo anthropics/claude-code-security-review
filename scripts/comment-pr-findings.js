@@ -88,6 +88,44 @@ function addReactionsToReview(reviewId) {
   }
 }
 
+// Helper function to delete old security comments
+function deleteOldSecurityComments(existingSecurityComments) {
+  console.log(`Deleting ${existingSecurityComments.length} old security comments...`);
+  
+  for (const comment of existingSecurityComments) {
+    try {
+      ghApi(`/repos/${context.repo.owner}/${context.repo.repo}/pulls/comments/${comment.id}`, 'DELETE');
+      console.log(`Deleted security comment ${comment.id}`);
+    } catch (error) {
+      console.error(`Failed to delete comment ${comment.id}:`, error.message);
+    }
+  }
+}
+
+// Helper function to post a status update comment
+function postStatusComment(message) {
+  try {
+    const statusComment = {
+      body: message
+    };
+    
+    const commentResponse = ghApi(`/repos/${context.repo.owner}/${context.repo.repo}/issues/${context.issue.number}/comments`, 'POST', statusComment);
+    console.log('Posted status comment');
+    
+    // Add reactions to status comment
+    if (commentResponse && commentResponse.id) {
+      addReactionsToComment(commentResponse.id, false);
+    }
+  } catch (error) {
+    console.error('Failed to post status comment:', error.message);
+  }
+}
+
+// Helper function to format timestamp
+function getCurrentTimestamp() {
+  return new Date().toISOString();
+}
+
 async function run() {
   try {
     // Read the findings
@@ -118,12 +156,32 @@ async function run() {
     
     // Check if ClaudeCode comments should be silenced
     const silenceClaudeCodeComments = process.env.SILENCE_CLAUDECODE_COMMENTS === 'true';
+    const refreshComments = process.env.REFRESH_COMMENTS === 'true';
     
     if (silenceClaudeCodeComments) {
       console.log(`ClaudeCode comments silenced - excluding ${newFindings.length} findings from comments`);
       return;
     }
     
+    // Check for existing review comments
+    const comments = ghApi(`/repos/${context.repo.owner}/${context.repo.repo}/pulls/${context.issue.number}/comments`);
+    
+    // Identify existing security comments
+    const existingSecurityComments = comments.filter(comment => 
+      comment.user.type === 'Bot' && 
+      comment.body && comment.body.includes('🤖 **Security Issue:')
+    );
+    
+    // Handle comment refresh logic
+    if (existingSecurityComments.length > 0) {
+      if (refreshComments) {
+        console.log(`Found ${existingSecurityComments.length} existing security comments, refreshing...`);
+        deleteOldSecurityComments(existingSecurityComments);
+      } else {
+        console.log(`Found ${existingSecurityComments.length} existing security comments, skipping to avoid duplicates (refresh-comments disabled)`);
+        return;
+      }
+    }
     
     // Process findings synchronously (gh cli doesn't support async well)
     for (const finding of newFindings) {
@@ -139,11 +197,13 @@ async function run() {
         continue;
       }
       
-      // Build the comment body
+      // Build the comment body with timestamp and commit info
       let commentBody = `🤖 **Security Issue: ${message}**\n\n`;
       commentBody += `**Severity:** ${severity}\n`;
       commentBody += `**Category:** ${category}\n`;
       commentBody += `**Tool:** ClaudeCode AI Security Analysis\n`;
+      commentBody += `**Scan Time:** ${getCurrentTimestamp()}\n`;
+      commentBody += `**Commit:** ${context.payload.pull_request.head.sha.slice(0, 7)}\n`;
       
       // Add exploit scenario if available
       if (finding.exploit_scenario || (finding.extra && finding.extra.metadata && finding.extra.metadata.exploit_scenario)) {
@@ -168,22 +228,15 @@ async function run() {
       reviewComments.push(reviewComment);
     }
     
+    // Handle case where no new findings were found
     if (reviewComments.length === 0) {
-      console.log('No findings to comment on PR diff');
-      return;
-    }
-    
-    // Check for existing review comments to avoid duplicates
-    const comments = ghApi(`/repos/${context.repo.owner}/${context.repo.repo}/pulls/${context.issue.number}/comments`);
-    
-    // Check if we've already commented on these findings
-    const existingSecurityComments = comments.filter(comment => 
-      comment.user.type === 'Bot' && 
-      comment.body && comment.body.includes('🤖 **Security Issue:')
-    );
-    
-    if (existingSecurityComments.length > 0) {
-      console.log(`Found ${existingSecurityComments.length} existing security comments, skipping to avoid duplicates`);
+      // If we had old security comments and no new findings, post a positive status
+      if (existingSecurityComments.length > 0 && refreshComments) {
+        const statusMessage = `✅ **Security Scan Update**\n\nLatest scan found no security issues in the recent changes!\n\n*Scanned commit: ${context.payload.pull_request.head.sha.slice(0, 7)}*\n*Scan time: ${getCurrentTimestamp()}*`;
+        postStatusComment(statusMessage);
+      } else {
+        console.log('No findings to comment on PR diff');
+      }
       return;
     }
         

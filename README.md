@@ -52,6 +52,7 @@ jobs:
 | `exclude-directories` | Comma-separated list of directories to exclude from scanning | None | No |
 | `claudecode-timeout` | Timeout for ClaudeCode analysis in minutes | `20` | No |
 | `run-every-commit` | Run ClaudeCode on every commit (skips cache check). Warning: May increase false positives on PRs with many commits. | `false` | No |
+| `refresh-comments` | Whether to refresh security comments on new commits (delete old security comments and post new results) | `true` | No |
 | `false-positive-filtering-instructions` | Path to custom false positive filtering instructions text file | None | No |
 | `custom-security-scan-instructions` | Path to custom security scan instructions text file to append to audit prompt | None | No |
 
@@ -85,6 +86,24 @@ claudecode/
 3. **Finding Generation**: Security issues are identified with detailed explanations, severity ratings, and remediation guidance
 4. **False Positive Filtering**: Advanced filtering removes low-impact or false positive prone findings to reduce noise
 5. **PR Comments**: Findings are posted as review comments on the specific lines of code
+
+### Smart Comment Management
+
+The action includes intelligent comment management to handle evolving PRs:
+
+- **Comment Refreshing**: When `refresh-comments` is enabled (default), old security comments are automatically deleted when new commits are pushed
+- **Status Updates**: If no new security issues are found after a rescan, a positive status comment is posted
+- **Timestamped Comments**: Each security comment includes scan time and commit hash for traceability
+- **Duplicate Prevention**: Comments are intelligently deduplicated to avoid noise
+
+**Example Configuration for Comment Management**:
+```yaml
+- uses: anthropics/claude-code-security-review@main
+  with:
+    claude-api-key: ${{ secrets.CLAUDE_API_KEY }}
+    run-every-commit: true      # Rescan on every commit
+    refresh-comments: true      # Delete old comments and post new results
+```
 
 ## Security Analysis Capabilities
 
