@@ -26,6 +26,7 @@ from claudecode.constants import (
     SUBPROCESS_TIMEOUT
 )
 from claudecode.logger import get_logger
+from claudecode.platform_utils import run_claude_subprocess, get_platform_adapter
 
 logger = get_logger(__name__)
 
@@ -230,7 +231,7 @@ class SimpleClaudeRunner:
             # Run Claude Code with retry logic
             NUM_RETRIES = 3
             for attempt in range(NUM_RETRIES):
-                result = subprocess.run(
+                result = run_claude_subprocess(
                     cmd,
                     input=prompt,  # Pass prompt via stdin
                     cwd=repo_dir,
@@ -313,34 +314,19 @@ class SimpleClaudeRunner:
     
     def validate_claude_available(self) -> Tuple[bool, str]:
         """Validate that Claude Code is available."""
-        try:
-            result = subprocess.run(
-                ['claude', '--version'],
-                capture_output=True,
-                text=True,
-                timeout=10
-            )
-            
-            if result.returncode == 0:
-                # Also check if API key is configured
-                api_key = os.environ.get('ANTHROPIC_API_KEY', '')
-                if not api_key:
-                    return False, "ANTHROPIC_API_KEY environment variable is not set"
-                return True, ""
-            else:
-                error_msg = f"Claude Code returned exit code {result.returncode}"
-                if result.stderr:
-                    error_msg += f". Stderr: {result.stderr}"
-                if result.stdout:
-                    error_msg += f". Stdout: {result.stdout}"
-                return False, error_msg
-                
-        except subprocess.TimeoutExpired:
-            return False, "Claude Code command timed out"
-        except FileNotFoundError:
-            return False, "Claude Code is not installed or not in PATH"
-        except Exception as e:
-            return False, f"Failed to check Claude Code: {str(e)}"
+        # Use platform adapter for robust cross-platform validation
+        platform_adapter = get_platform_adapter()
+        is_available, error_msg = platform_adapter.validate_claude_availability()
+        
+        if not is_available:
+            return False, error_msg
+        
+        # Also check if API key is configured
+        api_key = os.environ.get('ANTHROPIC_API_KEY', '')
+        if not api_key:
+            return False, "ANTHROPIC_API_KEY environment variable is not set"
+        
+        return True, ""
 
 
 
