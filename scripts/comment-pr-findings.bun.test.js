@@ -498,7 +498,9 @@ describe('comment-pr-findings.js', () => {
   });
 
   describe('Comment Cleanup', () => {
-    test('should delete existing security comments before posting new ones', async () => {
+    test('should delete existing security comments when DELETE_EXISTING_COMMENTS is true', async () => {
+      process.env.DELETE_EXISTING_COMMENTS = 'true';
+
       const mockFindings = [{
         file: 'test.py',
         line: 10,
@@ -556,7 +558,7 @@ describe('comment-pr-findings.js', () => {
           if (endpoint.includes('/pulls/comments/') && method === 'DELETE') {
             const commentId = endpoint.match(/\/pulls\/comments\/(\d+)/)[1];
             deletedCommentIds.push(parseInt(commentId));
-            return { status: 0, stdout: '{}', stderr: '' };
+            return { status: 0, stdout: '', stderr: '' };
           }
           if (endpoint.includes('/pulls/123/reviews') && method === 'POST') {
             return { status: 0, stdout: '{}', stderr: '' };
@@ -573,7 +575,74 @@ describe('comment-pr-findings.js', () => {
       expect(deletedCommentIds).toContain(222);
     });
 
-    test('should not delete non-security comments', async () => {
+    test('should not delete comments when DELETE_EXISTING_COMMENTS is not set', async () => {
+      delete process.env.DELETE_EXISTING_COMMENTS;
+
+      const mockFindings = [{
+        file: 'test.py',
+        line: 10,
+        description: 'SQL Injection vulnerability',
+        severity: 'HIGH',
+        category: 'sql_injection'
+      }];
+
+      const mockPrFiles = [{
+        filename: 'test.py',
+        patch: '@@ -10,1 +10,1 @@'
+      }];
+
+      const existingComments = [{
+        id: 111,
+        path: 'test.py',
+        user: { type: 'Bot' },
+        body: '🤖 **Security Issue: Old finding**'
+      }];
+
+      readFileSyncSpy.mockImplementation((path) => {
+        if (path.includes('github-event.json')) {
+          return JSON.stringify({
+            pull_request: { number: 123, head: { sha: 'abc123' } }
+          });
+        }
+        if (path === 'findings.json') {
+          return JSON.stringify(mockFindings);
+        }
+      });
+
+      const deletedCommentIds = [];
+      spawnSyncSpy.mockImplementation((cmd, args, options) => {
+        if (cmd === 'gh' && args.includes('api')) {
+          const endpoint = args[1];
+          const method = args[args.indexOf('--method') + 1] || 'GET';
+
+          if (endpoint.includes('/pulls/123/files')) {
+            return { status: 0, stdout: JSON.stringify(mockPrFiles), stderr: '' };
+          }
+          if (endpoint.includes('/pulls/123/comments') && method === 'GET') {
+            return { status: 0, stdout: JSON.stringify(existingComments), stderr: '' };
+          }
+          if (endpoint.includes('/pulls/comments/') && method === 'DELETE') {
+            const commentId = endpoint.match(/\/pulls\/comments\/(\d+)/)[1];
+            deletedCommentIds.push(parseInt(commentId));
+            return { status: 0, stdout: '', stderr: '' };
+          }
+          if (endpoint.includes('/pulls/123/reviews') && method === 'POST') {
+            return { status: 0, stdout: '{}', stderr: '' };
+          }
+          return { status: 0, stdout: '{}', stderr: '' };
+        }
+        return { status: 0, stdout: '{}', stderr: '' };
+      });
+
+      await import('./comment-pr-findings.js');
+
+      // Should NOT delete any comments when flag is not set
+      expect(deletedCommentIds).toHaveLength(0);
+    });
+
+    test('should not delete non-security comments when DELETE_EXISTING_COMMENTS is true', async () => {
+      process.env.DELETE_EXISTING_COMMENTS = 'true';
+
       const mockFindings = [{
         file: 'test.py',
         line: 10,
@@ -629,7 +698,7 @@ describe('comment-pr-findings.js', () => {
           if (endpoint.includes('/pulls/comments/') && method === 'DELETE') {
             const commentId = endpoint.match(/\/pulls\/comments\/(\d+)/)[1];
             deletedCommentIds.push(parseInt(commentId));
-            return { status: 0, stdout: '{}', stderr: '' };
+            return { status: 0, stdout: '', stderr: '' };
           }
           if (endpoint.includes('/pulls/123/reviews') && method === 'POST') {
             return { status: 0, stdout: '{}', stderr: '' };

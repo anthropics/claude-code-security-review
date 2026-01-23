@@ -48,6 +48,11 @@ inputs:
     required: false
     default: ''
 
+  delete-existing-comments:
+    description: 'Delete existing security comments before posting new ones. Ensures no duplicate or stale comments.'
+    required: false
+    default: 'false'
+
 outputs:
   findings-count:
     description: 'Number of security findings'
@@ -324,6 +329,7 @@ runs:
         GITHUB_TOKEN: ${{ github.token }}
         CLAUDECODE_FINDINGS: ${{ steps.claudecode-scan.outputs.findings_count }}
         SILENCE_CLAUDECODE_COMMENTS: ${{ steps.claudecode-check.outputs.silence_claudecode_comments }}
+        DELETE_EXISTING_COMMENTS: ${{ inputs.delete-existing-comments }}
         ACTION_PATH: ${{ github.action_path }}
       run: |
         node "$ACTION_PATH/scripts/comment-pr-findings.js"
