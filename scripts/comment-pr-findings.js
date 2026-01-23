@@ -175,17 +175,39 @@ async function run() {
     
     // Check for existing review comments to avoid duplicates
     const comments = ghApi(`/repos/${context.repo.owner}/${context.repo.repo}/pulls/${context.issue.number}/comments`);
-    
-    // Check if we've already commented on these findings
-    const existingSecurityComments = comments.filter(comment => 
-      comment.user.type === 'Bot' && 
+
+    // Get existing security comments
+    const existingSecurityComments = comments.filter(comment =>
+      comment.user.type === 'Bot' &&
       comment.body && comment.body.includes('🤖 **Security Issue:')
     );
-    
+
+    // Filter out duplicates - a comment is duplicate if same file and same issue message
+    const filteredComments = reviewComments.filter(newComment => {
+      const isDuplicate = existingSecurityComments.some(existing => {
+        const sameFile = existing.path === newComment.path;
+        // Extract issue message from both comments for comparison
+        const existingMatch = existing.body.match(/\*\*Security Issue: (.+?)\*\*/);
+        const newMatch = newComment.body.match(/\*\*Security Issue: (.+?)\*\*/);
+        const sameMessage = existingMatch && newMatch && existingMatch[1] === newMatch[1];
+        return sameFile && sameMessage;
+      });
+      return !isDuplicate;
+    });
+
     if (existingSecurityComments.length > 0) {
-      console.log(`Found ${existingSecurityComments.length} existing security comments, skipping to avoid duplicates`);
+      console.log(`Found ${existingSecurityComments.length} existing security comments`);
+      console.log(`Filtered to ${filteredComments.length} new findings to post`);
+    }
+
+    if (filteredComments.length === 0) {
+      console.log('No new findings to comment on');
       return;
     }
+
+    // Use filtered comments for the review
+    reviewComments.length = 0;
+    reviewComments.push(...filteredComments);
         
     try {
       // Create a review with all the comments
