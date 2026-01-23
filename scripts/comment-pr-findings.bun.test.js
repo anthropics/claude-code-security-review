@@ -497,6 +497,157 @@ describe('comment-pr-findings.js', () => {
     });
   });
 
+  describe('Comment Cleanup', () => {
+    test('should delete existing security comments before posting new ones', async () => {
+      const mockFindings = [{
+        file: 'test.py',
+        line: 10,
+        description: 'SQL Injection vulnerability',
+        severity: 'HIGH',
+        category: 'sql_injection'
+      }];
+
+      const mockPrFiles = [{
+        filename: 'test.py',
+        patch: '@@ -10,1 +10,1 @@'
+      }];
+
+      // Existing security comments that should be deleted
+      const existingComments = [
+        {
+          id: 111,
+          path: 'test.py',
+          line: 10,
+          user: { type: 'Bot' },
+          body: '🤖 **Security Issue: Old finding**\n\n**Severity:** HIGH'
+        },
+        {
+          id: 222,
+          path: 'test.py',
+          line: 20,
+          user: { type: 'Bot' },
+          body: '🤖 **Security Issue: Another old finding**\n\n**Severity:** MEDIUM'
+        }
+      ];
+
+      readFileSyncSpy.mockImplementation((path) => {
+        if (path.includes('github-event.json')) {
+          return JSON.stringify({
+            pull_request: { number: 123, head: { sha: 'abc123' } }
+          });
+        }
+        if (path === 'findings.json') {
+          return JSON.stringify(mockFindings);
+        }
+      });
+
+      const deletedCommentIds = [];
+      spawnSyncSpy.mockImplementation((cmd, args, options) => {
+        if (cmd === 'gh' && args.includes('api')) {
+          const endpoint = args[1];
+          const method = args[args.indexOf('--method') + 1] || 'GET';
+
+          if (endpoint.includes('/pulls/123/files')) {
+            return { status: 0, stdout: JSON.stringify(mockPrFiles), stderr: '' };
+          }
+          if (endpoint.includes('/pulls/123/comments') && method === 'GET') {
+            return { status: 0, stdout: JSON.stringify(existingComments), stderr: '' };
+          }
+          if (endpoint.includes('/pulls/comments/') && method === 'DELETE') {
+            const commentId = endpoint.match(/\/pulls\/comments\/(\d+)/)[1];
+            deletedCommentIds.push(parseInt(commentId));
+            return { status: 0, stdout: '{}', stderr: '' };
+          }
+          if (endpoint.includes('/pulls/123/reviews') && method === 'POST') {
+            return { status: 0, stdout: '{}', stderr: '' };
+          }
+          return { status: 0, stdout: '{}', stderr: '' };
+        }
+        return { status: 0, stdout: '{}', stderr: '' };
+      });
+
+      await import('./comment-pr-findings.js');
+
+      expect(consoleLogSpy).toHaveBeenCalledWith('Deleting 2 existing security comments');
+      expect(deletedCommentIds).toContain(111);
+      expect(deletedCommentIds).toContain(222);
+    });
+
+    test('should not delete non-security comments', async () => {
+      const mockFindings = [{
+        file: 'test.py',
+        line: 10,
+        description: 'SQL Injection vulnerability',
+        severity: 'HIGH',
+        category: 'sql_injection'
+      }];
+
+      const mockPrFiles = [{
+        filename: 'test.py',
+        patch: '@@ -10,1 +10,1 @@'
+      }];
+
+      // Mix of security and non-security comments
+      const existingComments = [
+        {
+          id: 111,
+          path: 'test.py',
+          user: { type: 'Bot' },
+          body: '🤖 **Security Issue: Old finding**'
+        },
+        {
+          id: 222,
+          path: 'test.py',
+          user: { type: 'User' },
+          body: 'This is a regular review comment'
+        }
+      ];
+
+      readFileSyncSpy.mockImplementation((path) => {
+        if (path.includes('github-event.json')) {
+          return JSON.stringify({
+            pull_request: { number: 123, head: { sha: 'abc123' } }
+          });
+        }
+        if (path === 'findings.json') {
+          return JSON.stringify(mockFindings);
+        }
+      });
+
+      const deletedCommentIds = [];
+      spawnSyncSpy.mockImplementation((cmd, args, options) => {
+        if (cmd === 'gh' && args.includes('api')) {
+          const endpoint = args[1];
+          const method = args[args.indexOf('--method') + 1] || 'GET';
+
+          if (endpoint.includes('/pulls/123/files')) {
+            return { status: 0, stdout: JSON.stringify(mockPrFiles), stderr: '' };
+          }
+          if (endpoint.includes('/pulls/123/comments') && method === 'GET') {
+            return { status: 0, stdout: JSON.stringify(existingComments), stderr: '' };
+          }
+          if (endpoint.includes('/pulls/comments/') && method === 'DELETE') {
+            const commentId = endpoint.match(/\/pulls\/comments\/(\d+)/)[1];
+            deletedCommentIds.push(parseInt(commentId));
+            return { status: 0, stdout: '{}', stderr: '' };
+          }
+          if (endpoint.includes('/pulls/123/reviews') && method === 'POST') {
+            return { status: 0, stdout: '{}', stderr: '' };
+          }
+          return { status: 0, stdout: '{}', stderr: '' };
+        }
+        return { status: 0, stdout: '{}', stderr: '' };
+      });
+
+      await import('./comment-pr-findings.js');
+
+      // Should only delete the security comment (id 111), not the regular comment (id 222)
+      expect(consoleLogSpy).toHaveBeenCalledWith('Deleting 1 existing security comments');
+      expect(deletedCommentIds).toContain(111);
+      expect(deletedCommentIds).not.toContain(222);
+    });
+  });
+
   describe('Error Handling', () => {
     test('should handle GitHub API errors gracefully', async () => {
      

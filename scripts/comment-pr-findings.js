@@ -172,7 +172,26 @@ async function run() {
       console.log('No findings to comment on PR diff');
       return;
     }
-    
+
+    // Delete existing security comments from the bot before posting new ones
+    // This ensures a clean slate and avoids duplicate/stale comments
+    const existingComments = ghApi(`/repos/${context.repo.owner}/${context.repo.repo}/pulls/${context.issue.number}/comments`);
+    const securityComments = existingComments.filter(comment =>
+      comment.user.type === 'Bot' &&
+      comment.body && comment.body.includes('🤖 **Security Issue:')
+    );
+
+    if (securityComments.length > 0) {
+      console.log(`Deleting ${securityComments.length} existing security comments`);
+      for (const comment of securityComments) {
+        try {
+          ghApi(`/repos/${context.repo.owner}/${context.repo.repo}/pulls/comments/${comment.id}`, 'DELETE');
+        } catch (err) {
+          console.error(`Failed to delete comment ${comment.id}:`, err.message);
+        }
+      }
+    }
+
     try {
       // Create a review with all the comments
       const reviewData = {
