@@ -521,12 +521,13 @@ describe('comment-pr-findings.js', () => {
         patch: '@@ -10,20 +10,20 @@'
       }];
 
-      // Existing comment for SQL Injection only
+      // Existing comment for SQL Injection at line 10 only
       const existingComments = [{
         id: 1,
         path: 'test.py',
+        line: 10,
         user: { type: 'Bot' },
-        body: '🤖 **Security Issue: SQL Injection vulnerability**\n\n**Severity:** HIGH'
+        body: '🤖 **Security Issue: SQL Injection vulnerability**\n\n**Severity:** HIGH\n**Category:** sql_injection'
       }];
 
       readFileSyncSpy.mockImplementation((path) => {
@@ -590,8 +591,9 @@ describe('comment-pr-findings.js', () => {
       const existingComments = [{
         id: 1,
         path: 'test.py',
+        line: 10,
         user: { type: 'Bot' },
-        body: '🤖 **Security Issue: SQL Injection vulnerability**\n\n**Severity:** HIGH'
+        body: '🤖 **Security Issue: SQL Injection vulnerability**\n\n**Severity:** HIGH\n**Category:** sql_injection'
       }];
 
       readFileSyncSpy.mockImplementation((path) => {
@@ -626,6 +628,71 @@ describe('comment-pr-findings.js', () => {
       expect(consoleLogSpy).toHaveBeenCalledWith('Found 1 existing security comments');
       expect(consoleLogSpy).toHaveBeenCalledWith('Filtered to 0 new findings to post');
       expect(consoleLogSpy).toHaveBeenCalledWith('No new findings to comment on');
+    });
+
+    test('should post finding at different line even with same category', async () => {
+      const mockFindings = [{
+        file: 'test.py',
+        line: 25,
+        description: 'Another SQL Injection',
+        severity: 'HIGH',
+        category: 'sql_injection'
+      }];
+
+      const mockPrFiles = [{
+        filename: 'test.py',
+        patch: '@@ -10,30 +10,30 @@'
+      }];
+
+      // Existing comment for SQL Injection at line 10
+      const existingComments = [{
+        id: 1,
+        path: 'test.py',
+        line: 10,
+        user: { type: 'Bot' },
+        body: '🤖 **Security Issue: SQL Injection**\n\n**Severity:** HIGH\n**Category:** sql_injection'
+      }];
+
+      readFileSyncSpy.mockImplementation((path) => {
+        if (path.includes('github-event.json')) {
+          return JSON.stringify({
+            pull_request: { number: 123, head: { sha: 'abc123' } }
+          });
+        }
+        if (path === 'findings.json') {
+          return JSON.stringify(mockFindings);
+        }
+      });
+
+      let capturedReviewData;
+      spawnSyncSpy.mockImplementation((cmd, args, options) => {
+        if (cmd === 'gh' && args.includes('api')) {
+          const endpoint = args[1];
+          const method = args[args.indexOf('--method') + 1] || 'GET';
+
+          if (endpoint.includes('/pulls/123/files')) {
+            return { status: 0, stdout: JSON.stringify(mockPrFiles), stderr: '' };
+          }
+          if (endpoint.includes('/pulls/123/comments') && method === 'GET') {
+            return { status: 0, stdout: JSON.stringify(existingComments), stderr: '' };
+          }
+          if (endpoint.includes('/pulls/123/reviews') && method === 'POST') {
+            if (options && options.input) {
+              capturedReviewData = JSON.parse(options.input);
+            }
+            return { status: 0, stdout: '{}', stderr: '' };
+          }
+          return { status: 0, stdout: '{}', stderr: '' };
+        }
+        return { status: 0, stdout: '{}', stderr: '' };
+      });
+
+      await import('./comment-pr-findings.js');
+
+      expect(capturedReviewData).toBeDefined();
+      // Should post the finding at line 25 even though same category exists at line 10
+      expect(capturedReviewData.comments).toHaveLength(1);
+      expect(capturedReviewData.comments[0].line).toBe(25);
     });
   });
 

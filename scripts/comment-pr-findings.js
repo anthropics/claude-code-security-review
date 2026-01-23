@@ -182,15 +182,17 @@ async function run() {
       comment.body && comment.body.includes('🤖 **Security Issue:')
     );
 
-    // Filter out duplicates - a comment is duplicate if same file and same issue message
+    // Filter out duplicates - a comment is duplicate if same file, line, and category
     const filteredComments = reviewComments.filter(newComment => {
       const isDuplicate = existingSecurityComments.some(existing => {
         const sameFile = existing.path === newComment.path;
-        // Extract issue message from both comments for comparison
-        const existingMatch = existing.body.match(/\*\*Security Issue: (.+?)\*\*/);
-        const newMatch = newComment.body.match(/\*\*Security Issue: (.+?)\*\*/);
-        const sameMessage = existingMatch && newMatch && existingMatch[1] === newMatch[1];
-        return sameFile && sameMessage;
+        const sameLine = existing.line === newComment.line || existing.original_line === newComment.line;
+        // Extract category from both comments for comparison
+        const existingCategoryMatch = existing.body.match(/\*\*Category:\*\* (\S+)/);
+        const newCategoryMatch = newComment.body.match(/\*\*Category:\*\* (\S+)/);
+        const sameCategory = existingCategoryMatch && newCategoryMatch &&
+          existingCategoryMatch[1] === newCategoryMatch[1];
+        return sameFile && sameLine && sameCategory;
       });
       return !isDuplicate;
     });
