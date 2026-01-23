@@ -46,6 +46,10 @@ function ghApi(endpoint, method = 'GET', data = null) {
       throw new Error(`gh process exited with code ${result.status}: ${result.stderr}`);
     }
     
+    // Handle empty responses (e.g., DELETE returns 204 No Content)
+    if (!result.stdout || result.stdout.trim() === '') {
+      return {};
+    }
     return JSON.parse(result.stdout);
   } catch (error) {
     console.error(`Error calling GitHub API: ${error.message}`);
