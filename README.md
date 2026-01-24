@@ -40,6 +40,18 @@ jobs:
           claude-api-key: ${{ secrets.CLAUDE_API_KEY }}
 ```
 
+### Using with LiteLLM Proxy
+
+If you're using a LiteLLM proxy or other compatible API proxy, configure it like this:
+
+```yaml
+      - uses: anthropics/claude-code-security-review@main
+        with:
+          comment-pr: true
+          anthropic-base-url: https://litellm.proxy.example.com
+          anthropic-auth-token: ${{ secrets.LITELLM_TOKEN }}
+```
+
 ## Security Considerations
 
 This action is not hardened against prompt injection attacks and should only be used to review trusted PRs. We recommend [configuring your repository](https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/enabling-features-for-your-repository/managing-github-actions-settings-for-a-repository#controlling-changes-from-forks-to-workflows-in-public-repositories) to use the "Require approval for all external contributors" option to ensure workflows only run after a maintainer has reviewed the PR.
@@ -51,6 +63,8 @@ This action is not hardened against prompt injection attacks and should only be 
 | Input | Description | Default | Required |
 |-------|-------------|---------|----------|
 | `claude-api-key` | Anthropic Claude API key for security analysis. <br>*Note*: This API key needs to be enabled for both the Claude API and Claude Code usage. | None | Yes |
+| `anthropic-base-url` | Custom Anthropic API base URL for proxying through LiteLLM or other compatible proxy services (e.g., `https://litellm.prod.example.com`) | None | No |
+| `anthropic-auth-token` | Alternative authentication token for use with LiteLLM proxy (use instead of `claude-api-key` when using a proxy that requires a different token format) | None | No |
 | `comment-pr` | Whether to comment on PRs with findings | `true` | No |
 | `upload-results` | Whether to upload results as artifacts | `true` | No |
 | `exclude-directories` | Comma-separated list of directories to exclude from scanning | None | No |

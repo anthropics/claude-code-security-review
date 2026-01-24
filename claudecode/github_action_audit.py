@@ -323,10 +323,10 @@ class SimpleClaudeRunner:
             )
             
             if result.returncode == 0:
-                # Also check if API key is configured
-                api_key = os.environ.get('ANTHROPIC_API_KEY', '')
+                # Also check if API key or auth token is configured
+                api_key = os.environ.get('ANTHROPIC_API_KEY') or os.environ.get('ANTHROPIC_AUTH_TOKEN')
                 if not api_key:
-                    return False, "ANTHROPIC_API_KEY environment variable is not set"
+                    return False, "ANTHROPIC_API_KEY or ANTHROPIC_AUTH_TOKEN environment variable is not set"
                 return True, ""
             else:
                 error_msg = f"Claude Code returned exit code {result.returncode}"
@@ -396,27 +396,29 @@ def initialize_clients() -> Tuple[GitHubActionClient, SimpleClaudeRunner]:
 
 def initialize_findings_filter(custom_filtering_instructions: Optional[str] = None) -> FindingsFilter:
     """Initialize findings filter based on environment configuration.
-    
+
     Args:
         custom_filtering_instructions: Optional custom filtering instructions
-        
+
     Returns:
         FindingsFilter instance
-        
+
     Raises:
         ConfigurationError: If filter initialization fails
     """
     try:
         # Check if we should use Claude API filtering
         use_claude_filtering = os.environ.get('ENABLE_CLAUDE_FILTERING', 'false').lower() == 'true'
-        api_key = os.environ.get('ANTHROPIC_API_KEY')
-        
+        api_key = os.environ.get('ANTHROPIC_API_KEY') or os.environ.get('ANTHROPIC_AUTH_TOKEN')
+        base_url = os.environ.get('ANTHROPIC_BASE_URL')
+
         if use_claude_filtering and api_key:
             # Use full filtering with Claude API
             return FindingsFilter(
                 use_hard_exclusions=True,
                 use_claude_filtering=True,
                 api_key=api_key,
+                base_url=base_url,
                 custom_filtering_instructions=custom_filtering_instructions
             )
         else:
