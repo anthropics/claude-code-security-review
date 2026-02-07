@@ -556,3 +556,53 @@ class TestAuditFailureModes:
             output = json.loads(captured.out)
             assert 'Security audit failed' in output['error']
             assert 'Claude execution failed' in output['error']
+
+    @patch('pathlib.Path.cwd')
+    @patch('claudecode.github_action_audit.get_security_audit_prompt')
+    @patch('claudecode.github_action_audit.FindingsFilter')
+    @patch('claudecode.github_action_audit.SimpleClaudeRunner')
+    @patch('claudecode.github_action_audit.GitHubActionClient')
+    def test_incomplete_review_fails_step(self, mock_client_class, mock_runner_class,
+                                         mock_filter_class, mock_prompt_func,
+                                         mock_cwd, capsys):
+        """When review did not complete (e.g. token limit), fail the step so CI shows it (issue #63)."""
+        mock_client = Mock()
+        mock_client.get_pr_data.return_value = {'number': 123, 'title': 'Test', 'body': ''}
+        mock_client.get_pr_diff.return_value = "diff"
+        mock_client._is_excluded.return_value = False
+        mock_client_class.return_value = mock_client
+
+        mock_runner = Mock()
+        mock_runner.validate_claude_available.return_value = (True, "")
+        mock_runner.run_security_audit.return_value = (
+            True,
+            "",
+            {
+                'findings': [],
+                'analysis_summary': {
+                    'files_reviewed': 0,
+                    'high_severity': 0,
+                    'medium_severity': 0,
+                    'low_severity': 0,
+                    'review_completed': False,
+                }
+            }
+        )
+        mock_runner_class.return_value = mock_runner
+        mock_filter_class.return_value = Mock()
+        mock_prompt_func.return_value = "prompt"
+        mock_cwd.return_value = Path('/tmp')
+
+        with patch.dict(os.environ, {
+            'GITHUB_REPOSITORY': 'owner/repo',
+            'PR_NUMBER': '123',
+            'GITHUB_TOKEN': 'test-token'
+        }):
+            with pytest.raises(SystemExit) as exc_info:
+                main()
+
+            assert exc_info.value.code == 1
+            captured = capsys.readouterr()
+            output = json.loads(captured.out)
+            assert 'error' in output
+            assert 'did not complete' in output['error']

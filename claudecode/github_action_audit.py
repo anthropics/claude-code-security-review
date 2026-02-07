@@ -598,6 +598,19 @@ def main():
             print(json.dumps({'error': f'Security audit failed: {error_msg}'}))
             sys.exit(EXIT_GENERAL_ERROR)
         
+        # When Claude hits token limits or errors mid-run, it can return success with no actual review.
+        # Fail the step and surface it so CI/logs show the problem instead of silently passing (see issue #63).
+        analysis_summary = results.get('analysis_summary', {})
+        if not analysis_summary.get('review_completed', True) and analysis_summary.get('files_reviewed', 0) == 0:
+            msg = (
+                "Security review did not complete (e.g. token limit or truncated output). "
+                "No files were reviewed. Failing the step so the run is visible in CI."
+            )
+            logger.warning(msg)
+            print(msg, file=sys.stderr)
+            print(json.dumps({'error': msg, 'analysis_summary': analysis_summary}))
+            sys.exit(EXIT_GENERAL_ERROR)
+        
         # Filter findings to reduce false positives
         original_findings = results.get('findings', [])
         
