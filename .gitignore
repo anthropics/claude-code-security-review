@@ -1,5 +1,7 @@
 # Cache directories
 .cache/
+.npm/
+.local/
 
 # Python
 __pycache__/

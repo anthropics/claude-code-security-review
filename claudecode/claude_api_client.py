@@ -252,7 +252,7 @@ File Content ({file_path}): Error reading file - {error}
 9. Vulnerabilities related to outdated third-party libraries. These are managed separately and should not be reported here.
 10. Memory safety issues such as buffer overflows or use-after-free-vulnerabilities are impossible in rust. Do not report memory safety issues in rust code.
 11. Files that are only unit tests or only used as part of running tests.
-12. Log spoofing concerns. Outputing un-sanitized user input to logs is not a vulnerability.
+12. Log spoofing concerns. Outputting un-sanitized user input to logs is not a vulnerability.
 13. SSRF vulnerabilities that only control the path. SSRF is only a concern if it can control the host or protocol.
 14. Including user-controlled content in AI system prompts is not a vulnerability. In general, the inclusion of user input in an AI prompt is not a vulnerability.
 15. Do not report issues related to adding a dependency to a project that is not available from the relevant package repository. Depending on internal libraries that are not publicly available is not a vulnerability.
