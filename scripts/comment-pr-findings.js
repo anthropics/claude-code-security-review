@@ -25,16 +25,38 @@ const context = {
 function ghApi(endpoint, method = 'GET', data = null) {
   // Build arguments array safely to prevent command injection
   const args = ['api', endpoint, '--method', method];
-  
+
   if (data) {
     args.push('--input', '-');
   }
-  
+
+  // Set up environment for gh CLI
+  // GH_TOKEN is the preferred way to authenticate gh CLI
+  // For GitHub Enterprise, GH_HOST should be set to the enterprise hostname
+  const env = { ...process.env };
+  if (process.env.GITHUB_TOKEN && !process.env.GH_TOKEN) {
+    env.GH_TOKEN = process.env.GITHUB_TOKEN;
+  }
+
+  // Extract hostname from GITHUB_API_URL for Enterprise support
+  if (process.env.GITHUB_API_URL && !process.env.GH_HOST) {
+    try {
+      const apiUrl = new URL(process.env.GITHUB_API_URL);
+      if (apiUrl.hostname !== 'api.github.com') {
+        env.GH_HOST = apiUrl.hostname;
+        console.log(`Using GitHub Enterprise host: ${apiUrl.hostname}`);
+      }
+    } catch (e) {
+      console.error(`Failed to parse GITHUB_API_URL: ${e.message}`);
+    }
+  }
+
   try {
     const result = spawnSync('gh', args, {
       encoding: 'utf8',
       input: data ? JSON.stringify(data) : undefined,
-      stdio: ['pipe', 'pipe', 'pipe']
+      stdio: ['pipe', 'pipe', 'pipe'],
+      env: env
     });
     
     if (result.error) {

@@ -39,19 +39,26 @@ class AuditError(ValueError):
 
 class GitHubActionClient:
     """Simplified GitHub API client for GitHub Actions environment."""
-    
+
     def __init__(self):
         """Initialize GitHub client using environment variables."""
         self.github_token = os.environ.get('GITHUB_TOKEN')
         if not self.github_token:
             raise ValueError("GITHUB_TOKEN environment variable required")
-            
+
         self.headers = {
             'Authorization': f'Bearer {self.github_token}',
             'Accept': 'application/vnd.github.v3+json',
             'X-GitHub-Api-Version': '2022-11-28'
         }
-        
+
+        # Get GitHub API URL - supports GitHub Enterprise
+        # GITHUB_API_URL is automatically set by GitHub Actions for Enterprise instances
+        # Falls back to public GitHub API if not set
+        self.api_base_url = os.environ.get('GITHUB_API_URL', 'https://api.github.com').rstrip('/')
+        if self.api_base_url != 'https://api.github.com':
+            print(f"[Info] Using GitHub Enterprise API: {self.api_base_url}", file=sys.stderr)
+
         # Get excluded directories from environment
         exclude_dirs = os.environ.get('EXCLUDE_DIRECTORIES', '')
         self.excluded_dirs = [d.strip() for d in exclude_dirs.split(',') if d.strip()] if exclude_dirs else []
@@ -69,13 +76,13 @@ class GitHubActionClient:
             Dictionary containing PR data
         """
         # Get PR metadata
-        pr_url = f"https://api.github.com/repos/{repo_name}/pulls/{pr_number}"
+        pr_url = f"{self.api_base_url}/repos/{repo_name}/pulls/{pr_number}"
         response = requests.get(pr_url, headers=self.headers)
         response.raise_for_status()
         pr_data = response.json()
-        
+
         # Get PR files with pagination support
-        files_url = f"https://api.github.com/repos/{repo_name}/pulls/{pr_number}/files?per_page=100"
+        files_url = f"{self.api_base_url}/repos/{repo_name}/pulls/{pr_number}/files?per_page=100"
         response = requests.get(files_url, headers=self.headers)
         response.raise_for_status()
         files_data = response.json()
@@ -126,7 +133,7 @@ class GitHubActionClient:
         Returns:
             Complete PR diff in unified format
         """
-        url = f"https://api.github.com/repos/{repo_name}/pulls/{pr_number}"
+        url = f"{self.api_base_url}/repos/{repo_name}/pulls/{pr_number}"
         headers = dict(self.headers)
         headers['Accept'] = 'application/vnd.github.diff'
         

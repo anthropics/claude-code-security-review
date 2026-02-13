@@ -83,7 +83,7 @@ class EvaluationEngine:
         self.github_token = os.environ.get('GITHUB_TOKEN', '')
         if not self.github_token:
             try:
-                result = subprocess.run(['gh', 'auth', 'token'], 
+                result = subprocess.run(['gh', 'auth', 'token'],
                                       capture_output=True, text=True, timeout=TIMEOUT_GIT_OPERATION)
                 if result.returncode == 0:
                     self.github_token = result.stdout.strip()
@@ -91,6 +91,20 @@ class EvaluationEngine:
                     self.log("Retrieved GitHub token from gh CLI")
             except (subprocess.SubprocessError, FileNotFoundError) as e:
                 self.log(f"Could not retrieve GitHub token from gh CLI: {e}")
+
+        # Get GitHub host for Enterprise support
+        # GITHUB_API_URL is set by GitHub Actions for Enterprise instances
+        self.github_host = 'github.com'
+        github_api_url = os.environ.get('GITHUB_API_URL', '')
+        if github_api_url:
+            try:
+                from urllib.parse import urlparse
+                parsed = urlparse(github_api_url)
+                if parsed.hostname and parsed.hostname != 'api.github.com':
+                    self.github_host = parsed.hostname
+                    self.log(f"Using GitHub Enterprise host: {self.github_host}")
+            except Exception as e:
+                self.log(f"Could not parse GITHUB_API_URL: {e}")
 
     
     def log(self, message: str, prefix: str = "[EVAL]") -> None:
@@ -232,40 +246,50 @@ class EvaluationEngine:
             # Clone or update the base repository
             if not os.path.exists(base_repo_path):
                 self.log(f"Cloning {repo_name} to {base_repo_path}")
-                clone_url = f"https://github.com/{repo_name}.git"
+                # Use x-access-token as username for PAT authentication (works with GitHub and GHE)
                 if self.github_token:
-                    clone_url = f"https://{self.github_token}@github.com/{repo_name}.git"
-                
+                    clone_url = f"https://x-access-token:{self.github_token}@{self.github_host}/{repo_name}.git"
+                else:
+                    clone_url = f"https://{self.github_host}/{repo_name}.git"
+
+                # Set GIT_TERMINAL_PROMPT=0 to prevent git from prompting for credentials
+                clone_env = os.environ.copy()
+                clone_env['GIT_TERMINAL_PROMPT'] = '0'
+
                 try:
                     subprocess.run(['git', 'clone', '--filter=blob:none', clone_url, base_repo_path],
-                                 check=True, capture_output=True, timeout=TIMEOUT_CLONE)
+                                 check=True, capture_output=True, timeout=TIMEOUT_CLONE, env=clone_env)
                 except subprocess.CalledProcessError as e:
                     error_msg = f"Failed to clone repository: {e.stderr.decode()}"
                     self.log(error_msg)
                     return False, "", error_msg
-            
+
             # Clean up any stale worktrees for this evaluation
             eval_branch_prefix = f"eval-pr-{safe_repo_name}-{pr_number}"
             self._clean_worktrees(base_repo_path, eval_branch_prefix)
-            
+
             # Create worktree for this specific evaluation
             eval_branch = self._get_eval_branch_name(test_case)
             worktree_path = os.path.join(self.work_dir, f"{safe_repo_name}_pr{pr_number}_{int(time.time())}")
-            
+
+            # Environment to prevent git from prompting for credentials
+            git_env = os.environ.copy()
+            git_env['GIT_TERMINAL_PROMPT'] = '0'
+
             try:
                 # Fetch the PR
                 self.log(f"Fetching PR #{pr_number} from {repo_name}")
                 subprocess.run(['git', '-C', base_repo_path, 'fetch', 'origin', f'pull/{pr_number}/head'],
-                             check=True, capture_output=True, timeout=TIMEOUT_FETCH)
-                
+                             check=True, capture_output=True, timeout=TIMEOUT_FETCH, env=git_env)
+
                 # Create new worktree with PR changes
                 self.log(f"Creating worktree at {worktree_path}")
-                subprocess.run(['git', '-C', base_repo_path, 'worktree', 'add', '-b', eval_branch, 
+                subprocess.run(['git', '-C', base_repo_path, 'worktree', 'add', '-b', eval_branch,
                               worktree_path, 'FETCH_HEAD'],
-                             check=True, capture_output=True, timeout=TIMEOUT_WORKTREE_CREATE)
-                
+                             check=True, capture_output=True, timeout=TIMEOUT_WORKTREE_CREATE, env=git_env)
+
                 return True, worktree_path, ""
-                
+
             except subprocess.CalledProcessError as e:
                 error_msg = f"Failed to set up worktree: {e.stderr.decode()}"
                 self.log(error_msg)
@@ -410,6 +434,9 @@ class EvaluationEngine:
         env['ANTHROPIC_API_KEY'] = self.claude_api_key
         if self.github_token:
             env['GITHUB_TOKEN'] = self.github_token
+        # Pass through GitHub API URL for Enterprise support
+        if os.environ.get('GITHUB_API_URL'):
+            env['GITHUB_API_URL'] = os.environ['GITHUB_API_URL']
         env['EVAL_MODE'] = '1'  # Enable eval mode
         
         # Run the audit script

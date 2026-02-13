@@ -34,7 +34,26 @@ class TestGitHubActionClient:
             assert client.headers['Authorization'] == 'Bearer test-token'
             assert 'Accept' in client.headers
             assert 'X-GitHub-Api-Version' in client.headers
-    
+            assert client.api_base_url == 'https://api.github.com'
+
+    def test_init_with_github_enterprise(self):
+        """Test initialization with GitHub Enterprise URL."""
+        with patch.dict(os.environ, {
+            'GITHUB_TOKEN': 'test-token',
+            'GITHUB_API_URL': 'https://github.mycompany.com/api/v3'
+        }):
+            client = GitHubActionClient()
+            assert client.api_base_url == 'https://github.mycompany.com/api/v3'
+
+    def test_init_with_github_enterprise_trailing_slash(self):
+        """Test initialization strips trailing slash from Enterprise URL."""
+        with patch.dict(os.environ, {
+            'GITHUB_TOKEN': 'test-token',
+            'GITHUB_API_URL': 'https://github.mycompany.com/api/v3/'
+        }):
+            client = GitHubActionClient()
+            assert client.api_base_url == 'https://github.mycompany.com/api/v3'
+
     @patch('requests.get')
     def test_get_pr_data_success(self, mock_get):
         """Test successful PR data retrieval."""
@@ -90,14 +109,14 @@ class TestGitHubActionClient:
             client = GitHubActionClient()
             result = client.get_pr_data('owner/repo', 123)
         
-        # Verify API calls
+        # Verify API calls use the configured base URL
         assert mock_get.call_count == 2
         mock_get.assert_any_call(
-            'https://api.github.com/repos/owner/repo/pulls/123',
+            f'{client.api_base_url}/repos/owner/repo/pulls/123',
             headers=client.headers
         )
         mock_get.assert_any_call(
-            'https://api.github.com/repos/owner/repo/pulls/123/files?per_page=100',
+            f'{client.api_base_url}/repos/owner/repo/pulls/123/files?per_page=100',
             headers=client.headers
         )
         
@@ -185,10 +204,10 @@ index abc123..def456 100644
             client = GitHubActionClient()
             result = client.get_pr_diff('owner/repo', 123)
         
-        # Verify API call
+        # Verify API call uses the configured base URL
         mock_get.assert_called_once()
         call_args = mock_get.call_args
-        assert call_args[0][0] == 'https://api.github.com/repos/owner/repo/pulls/123'
+        assert call_args[0][0] == f'{client.api_base_url}/repos/owner/repo/pulls/123'
         assert call_args[1]['headers']['Accept'] == 'application/vnd.github.diff'
         
         # Verify result
