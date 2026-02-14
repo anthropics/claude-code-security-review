@@ -3,8 +3,10 @@
 import os
 import json
 import time
+import ipaddress
 from typing import Dict, Any, Tuple, Optional
 from pathlib import Path
+from urllib.parse import urlparse
 
 from anthropic import Anthropic
 
@@ -18,37 +20,144 @@ from claudecode.logger import get_logger
 logger = get_logger(__name__)
 
 
+def validate_base_url(base_url: str) -> Tuple[bool, str]:
+    """Validate custom base URL to prevent SSRF and credential theft attacks.
+
+    Security checks:
+    1. Must use HTTPS (not HTTP) - prevents credential exposure in transit
+    2. Must have a valid hostname
+    3. Must NOT be an IP address - only domain names allowed
+    4. Must not be localhost or loopback address
+
+    Args:
+        base_url: The base URL to validate
+
+    Returns:
+        Tuple of (is_valid, error_message). error_message is empty string if valid.
+
+    Examples:
+        >>> validate_base_url("https://litellm.company.com")
+        (True, "")
+
+        >>> validate_base_url("http://litellm.company.com")
+        (False, "Invalid URL scheme 'http'. Only HTTPS is allowed...")
+
+        >>> validate_base_url("https://10.0.0.1")
+        (False, "Base URL cannot use IP address (10.0.0.1)...")
+
+        >>> validate_base_url("https://localhost")
+        (False, "Base URL cannot point to localhost...")
+    """
+    if not base_url or not base_url.strip():
+        return False, "Base URL cannot be empty"
+
+    try:
+        parsed = urlparse(base_url)
+
+        # Check 1: Must use HTTPS
+        if parsed.scheme != 'https':
+            return False, (
+                f"Invalid URL scheme '{parsed.scheme}'. Only HTTPS is allowed for security. "
+                f"Using HTTP could expose API credentials and data in transit."
+            )
+
+        # Check 2: Must have a hostname
+        if not parsed.hostname:
+            return False, "Base URL must have a valid hostname"
+
+        hostname = parsed.hostname.lower()
+
+        # Check 3: Reject all IP addresses (IPv4 and IPv6) - only domain names allowed
+        try:
+            ipaddress.ip_address(hostname)
+            # If we get here, it's an IP address - reject it
+            return False, (
+                f"Base URL cannot use IP address ({hostname}). Only domain names are allowed. "
+                f"Use a proper domain name instead (e.g., 'proxy.company.com' instead of '{hostname}')."
+            )
+        except ValueError:
+            # Not an IP address - good, it's a domain name, continue validation
+            pass
+
+        # Check 4: Block localhost patterns
+        localhost_patterns = {
+            'localhost',
+            'localhost.localdomain',
+        }
+
+        if hostname in localhost_patterns:
+            return False, (
+                f"Base URL cannot point to localhost ({hostname}). "
+                f"This could be used to steal API credentials."
+            )
+
+        # Check 5: Warn about suspicious hostname patterns (but don't block)
+        # Some legitimate services might use these in their domain names
+        suspicious_patterns = ['internal', 'corp', 'local', 'lan', 'intranet']
+
+        hostname_parts = hostname.split('.')
+        for part in hostname_parts:
+            if part in suspicious_patterns:
+                logger.warning(
+                    f"Base URL hostname '{hostname}' contains potentially suspicious component '{part}'. "
+                    f"Ensure this points to a trusted external proxy service."
+                )
+                break
+
+        # All checks passed
+        logger.info(f"Base URL validation passed for: {hostname}")
+        return True, ""
+
+    except Exception as e:
+        return False, f"Failed to parse base URL: {str(e)}"
+
+
 class ClaudeAPIClient:
     """Client for calling Claude API directly for security analysis tasks."""
     
-    def __init__(self, 
+    def __init__(self,
                  model: Optional[str] = None,
                  api_key: Optional[str] = None,
+                 base_url: Optional[str] = None,
                  timeout_seconds: Optional[int] = None,
                  max_retries: Optional[int] = None):
         """Initialize Claude API client.
-        
+
         Args:
             model: Claude model to use
-            api_key: Anthropic API key (if None, reads from ANTHROPIC_API_KEY env var)
+            api_key: Anthropic API key (if None, reads from ANTHROPIC_API_KEY or ANTHROPIC_AUTH_TOKEN env var)
+            base_url: Custom Anthropic API base URL (if None, reads from ANTHROPIC_BASE_URL env var)
             timeout_seconds: Request timeout in seconds
             max_retries: Maximum retry attempts for API calls
         """
         self.model = model or DEFAULT_CLAUDE_MODEL
         self.timeout_seconds = timeout_seconds or DEFAULT_TIMEOUT_SECONDS
         self.max_retries = max_retries or DEFAULT_MAX_RETRIES
-        
+
         # Get API key from environment or parameter
-        self.api_key = api_key or os.environ.get("ANTHROPIC_API_KEY")
+        # Priority: api_key parameter > ANTHROPIC_API_KEY > ANTHROPIC_AUTH_TOKEN
+        self.api_key = api_key or os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_AUTH_TOKEN")
         if not self.api_key:
             raise ValueError(
-                "No Anthropic API key found. Please set ANTHROPIC_API_KEY environment variable "
+                "No Anthropic API key found. Please set ANTHROPIC_API_KEY or ANTHROPIC_AUTH_TOKEN environment variable "
                 "or provide api_key parameter."
             )
-        
+
+        # Get base URL from environment or parameter
+        base_url = base_url or os.environ.get("ANTHROPIC_BASE_URL")
+
         # Initialize Anthropic client
-        self.client = Anthropic(api_key=self.api_key)
-        logger.info("Claude API client initialized successfully")
+        if base_url:
+            # SECURITY: Validate base URL to prevent SSRF and credential theft
+            is_valid, error_msg = validate_base_url(base_url)
+            if not is_valid:
+                raise ValueError(f"Invalid base URL: {error_msg}")
+
+            self.client = Anthropic(api_key=self.api_key, base_url=base_url)
+            logger.info(f"Claude API client initialized successfully with custom base URL: {base_url}")
+        else:
+            self.client = Anthropic(api_key=self.api_key)
+            logger.info("Claude API client initialized successfully")
     
     def validate_api_access(self) -> Tuple[bool, str]:
         """Validate that API access is working.
@@ -356,20 +465,23 @@ Respond with EXACTLY this JSON structure (no markdown, no code blocks):
 
 def get_claude_api_client(model: str = DEFAULT_CLAUDE_MODEL,
                          api_key: Optional[str] = None,
+                         base_url: Optional[str] = None,
                          timeout_seconds: int = DEFAULT_TIMEOUT_SECONDS) -> ClaudeAPIClient:
     """Convenience function to get Claude API client.
-    
+
     Args:
         model: Claude model identifier
         api_key: Optional API key (reads from environment if not provided)
+        base_url: Optional custom base URL (reads from environment if not provided)
         timeout_seconds: API call timeout
-        
+
     Returns:
         Initialized ClaudeAPIClient instance
     """
     return ClaudeAPIClient(
         model=model,
         api_key=api_key,
+        base_url=base_url,
         timeout_seconds=timeout_seconds
     )
 

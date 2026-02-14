@@ -21,17 +21,47 @@ const context = {
   }
 };
 
+// Find gh CLI binary
+function findGhBinary() {
+  const homeDir = process.env.HOME || process.env.USERPROFILE;
+  const possiblePaths = [
+    'gh',  // In PATH
+    '/usr/bin/gh',  // Standard Linux location
+    '/usr/local/bin/gh',  // Alternative Linux location
+    `${homeDir}/.local/bin/gh`,  // User-installed location (self-hosted runners)
+  ];
+
+  for (const ghPath of possiblePaths) {
+    try {
+      const result = spawnSync(ghPath, ['--version'], {
+        encoding: 'utf8',
+        stdio: ['pipe', 'pipe', 'pipe'],
+        timeout: 5000
+      });
+      if (!result.error && result.status === 0) {
+        return ghPath;
+      }
+    } catch (error) {
+      // Continue to next path
+      continue;
+    }
+  }
+
+  throw new Error('GitHub CLI (gh) not found. Please ensure gh is installed and in PATH.');
+}
+
 // GitHub API helper using gh CLI
 function ghApi(endpoint, method = 'GET', data = null) {
   // Build arguments array safely to prevent command injection
   const args = ['api', endpoint, '--method', method];
-  
+
   if (data) {
     args.push('--input', '-');
   }
-  
+
   try {
-    const result = spawnSync('gh', args, {
+    const ghBinary = findGhBinary();
+    const result = spawnSync(ghBinary, args, {
       encoding: 'utf8',
       input: data ? JSON.stringify(data) : undefined,
       stdio: ['pipe', 'pipe', 'pipe']
@@ -196,13 +226,8 @@ async function run() {
       };
       
       const reviewResponse = ghApi(`/repos/${context.repo.owner}/${context.repo.repo}/pulls/${context.issue.number}/reviews`, 'POST', reviewData);
-      
+
       console.log(`Created review with ${reviewComments.length} inline comments`);
-      
-      // Add reactions to the comments
-      if (reviewResponse && reviewResponse.id) {
-        addReactionsToReview(reviewResponse.id);
-      }
     } catch (error) {
       console.error('Error creating review:', error);
       
@@ -221,12 +246,7 @@ async function run() {
             commit_id: context.payload.pull_request.head.sha
           };
           
-          const commentResponse = ghApi(`/repos/${context.repo.owner}/${context.repo.repo}/pulls/${context.issue.number}/comments`, 'POST', commentData);
-          
-          // Add reactions to the individual comment
-          if (commentResponse && commentResponse.id) {
-            addReactionsToComment(commentResponse.id, true);
-          }
+          ghApi(`/repos/${context.repo.owner}/${context.repo.repo}/pulls/${context.issue.number}/comments`, 'POST', commentData);
         } catch (lineError) {
           console.log(`Could not comment on ${comment.path}:${comment.line} - line might not be in diff context`);
           // If the specific line fails, try to get the file's patch and find a suitable line

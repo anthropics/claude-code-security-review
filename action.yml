@@ -28,6 +28,16 @@ inputs:
     required: true
     default: ''
 
+  anthropic-base-url:
+    description: 'Custom Anthropic API base URL (e.g., for LiteLLM proxy: https://litellm.prod.example.com)'
+    required: false
+    default: ''
+
+  anthropic-auth-token:
+    description: 'Alternative authentication token (use instead of claude-api-key for LiteLLM)'
+    required: false
+    default: ''
+
   claude-model:
     description: 'Claude model to use for security analysis (e.g., claude-sonnet-4-20250514)'
     required: false
@@ -60,12 +70,77 @@ outputs:
 runs:
   using: 'composite'
   steps:
-    - name: Install GitHub CLI
+    - name: Setup GitHub CLI
+      if: inputs.comment-pr == 'true'
       shell: bash
       run: |
-        echo "::group::Install gh CLI"
-        # Install GitHub CLI for PR operations
-        sudo apt-get update && sudo apt-get install -y gh
+        echo "::group::Setup gh CLI"
+
+        # Check if gh is already available
+        if command -v gh &> /dev/null; then
+          echo "✓ GitHub CLI is already installed"
+          gh --version
+          echo "::endgroup::"
+          exit 0
+        fi
+
+        echo "GitHub CLI not found, attempting to install..."
+
+        # Try method 1: apt-get with sudo (GitHub-hosted runners)
+        if command -v sudo &> /dev/null && command -v apt-get &> /dev/null; then
+          echo "Attempting installation via apt-get..."
+          if sudo apt-get update && sudo apt-get install -y gh; then
+            echo "✓ Successfully installed gh via apt-get"
+            gh --version
+            echo "::endgroup::"
+            exit 0
+          fi
+        fi
+
+        # Try method 2: Download and install without sudo (self-hosted runners)
+        echo "Attempting direct binary installation..."
+        GH_VERSION="2.62.0"
+        ARCH=$(uname -m)
+        OS=$(uname -s | tr '[:upper:]' '[:lower:]')
+
+        # Map architecture names
+        case "$ARCH" in
+          x86_64) ARCH="amd64" ;;
+          aarch64) ARCH="arm64" ;;
+          armv7l) ARCH="armv6" ;;
+        esac
+
+        # Create local bin directory
+        mkdir -p "$HOME/.local/bin"
+
+        # Download and extract gh CLI
+        GH_URL="https://github.com/cli/cli/releases/download/v${GH_VERSION}/gh_${GH_VERSION}_${OS}_${ARCH}.tar.gz"
+        echo "Downloading from: $GH_URL"
+
+        if curl -sL "$GH_URL" | tar xz -C /tmp; then
+          # Find the extracted directory
+          GH_DIR=$(find /tmp -maxdepth 1 -name "gh_${GH_VERSION}_*" -type d | head -n 1)
+          if [ -n "$GH_DIR" ] && [ -d "$GH_DIR" ]; then
+            cp "$GH_DIR/bin/gh" "$HOME/.local/bin/"
+            chmod +x "$HOME/.local/bin/gh"
+
+            # Add to PATH for subsequent steps
+            echo "$HOME/.local/bin" >> $GITHUB_PATH
+            export PATH="$HOME/.local/bin:$PATH"
+
+            if command -v gh &> /dev/null; then
+              echo "✓ Successfully installed gh to $HOME/.local/bin"
+              gh --version
+              echo "::endgroup::"
+              exit 0
+            fi
+          fi
+        fi
+
+        # If we get here, all installation methods failed
+        echo "::error::Failed to install GitHub CLI. PR commenting will not be available."
+        echo "Please pre-install gh on your self-hosted runner: https://cli.github.com/"
+        echo "GH_NOT_FOUND=true" >> $GITHUB_ENV
         echo "::endgroup::"
     
     - name: Set up Python
@@ -182,7 +257,9 @@ runs:
         GITHUB_REPOSITORY: ${{ github.repository }}
         PR_NUMBER: ${{ github.event.pull_request.number }}
         ANTHROPIC_API_KEY: ${{ inputs.claude-api-key }}
-        ENABLE_CLAUDE_FILTERING: 'true' 
+        ANTHROPIC_AUTH_TOKEN: ${{ inputs.anthropic-auth-token }}
+        ANTHROPIC_BASE_URL: ${{ inputs.anthropic-base-url }}
+        ENABLE_CLAUDE_FILTERING: 'true'
         EXCLUDE_DIRECTORIES: ${{ inputs.exclude-directories }}
         FALSE_POSITIVE_FILTERING_INSTRUCTIONS: ${{ inputs.false-positive-filtering-instructions }}
         CUSTOM_SECURITY_SCAN_INSTRUCTIONS: ${{ inputs.custom-security-scan-instructions }}
@@ -203,13 +280,19 @@ runs:
           exit 0
         fi
         
-        # Validate API key is provided
-        if [ -z "$ANTHROPIC_API_KEY" ]; then
-          echo "::error::ANTHROPIC_API_KEY is not set. Please provide the claude-api-key input to the action."
-          echo "Example usage:"
+        # Validate API key or auth token is provided
+        if [ -z "$ANTHROPIC_API_KEY" ] && [ -z "$ANTHROPIC_AUTH_TOKEN" ]; then
+          echo "::error::No authentication provided. Please provide either claude-api-key or anthropic-auth-token input to the action."
+          echo "Example usage with standard API:"
           echo "  - uses: anthropics/claude-code-security-reviewer@main"
           echo "    with:"
           echo "      claude-api-key: \$\{{ secrets.ANTHROPIC_API_KEY }}"
+          echo ""
+          echo "Example usage with LiteLLM proxy:"
+          echo "  - uses: anthropics/claude-code-security-reviewer@main"
+          echo "    with:"
+          echo "      anthropic-base-url: https://litellm.proxy.example.com"
+          echo "      anthropic-auth-token: \$\{{ secrets.LITELLM_TOKEN }}"
           exit 1
         fi
                 
@@ -240,11 +323,21 @@ runs:
         
         # Run from the action root directory so Python can find the claudecode module
         python -u claudecode/github_action_audit.py > claudecode/claudecode-results.json 2>claudecode/claudecode-error.log || CLAUDECODE_EXIT_CODE=$?
-        
+
         if [ -n "$CLAUDECODE_EXIT_CODE" ]; then
-          echo "::warning::ClaudeCode exited with code $CLAUDECODE_EXIT_CODE"
+          case "$CLAUDECODE_EXIT_CODE" in
+            1)
+              echo "✓ ClaudeCode scan completed - High severity findings detected (exit code 1)"
+              ;;
+            2)
+              echo "::error::ClaudeCode configuration error (exit code 2)"
+              ;;
+            *)
+              echo "::warning::ClaudeCode exited with unexpected code $CLAUDECODE_EXIT_CODE"
+              ;;
+          esac
         else
-          echo "ClaudeCode scan completed successfully"
+          echo "✓ ClaudeCode scan completed - No high severity findings (exit code 0)"
         fi
         
         # Parse ClaudeCode results and count findings regardless of exit code
@@ -317,8 +410,18 @@ runs:
         retention-days: 7
         if-no-files-found: ignore
     
+    - name: Skip PR comment (gh CLI not available)
+      if: github.event_name == 'pull_request' && inputs.comment-pr == 'true' && steps.claudecode-check.outputs.enable_claudecode == 'true' && env.GH_NOT_FOUND == 'true'
+      shell: bash
+      run: |
+        echo "::warning::Unable to comment on PR because GitHub CLI (gh) could not be installed."
+        echo "Security findings are still available in the workflow artifacts."
+        echo ""
+        echo "To enable PR comments on self-hosted runners, pre-install gh CLI:"
+        echo "  https://github.com/cli/cli/blob/trunk/docs/install_linux.md"
+
     - name: Comment PR with findings
-      if: github.event_name == 'pull_request' && inputs.comment-pr == 'true' && steps.claudecode-check.outputs.enable_claudecode == 'true'
+      if: github.event_name == 'pull_request' && inputs.comment-pr == 'true' && steps.claudecode-check.outputs.enable_claudecode == 'true' && env.GH_NOT_FOUND != 'true'
       shell: bash
       env:
         GITHUB_TOKEN: ${{ github.token }}
@@ -326,6 +429,15 @@ runs:
         SILENCE_CLAUDECODE_COMMENTS: ${{ steps.claudecode-check.outputs.silence_claudecode_comments }}
         ACTION_PATH: ${{ github.action_path }}
       run: |
+        # Ensure gh is in PATH (in case it was installed to ~/.local/bin)
+        export PATH="$HOME/.local/bin:$PATH"
+
+        # Verify gh is available
+        if ! command -v gh &> /dev/null; then
+          echo "::warning::GitHub CLI not found in PATH. Cannot comment on PR."
+          exit 0
+        fi
+
         node "$ACTION_PATH/scripts/comment-pr-findings.js"
 
 branding:
