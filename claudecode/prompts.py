@@ -1,14 +1,15 @@
 """Security audit prompt templates."""
 
-def get_security_audit_prompt(pr_data, pr_diff=None, include_diff=True, custom_scan_instructions=None):
+def get_security_audit_prompt(pr_data, pr_diff=None, include_diff=True, custom_scan_instructions=None, governance_context=None):
     """Generate security audit prompt for Claude Code.
-    
+
     Args:
         pr_data: PR data dictionary from GitHub API
         pr_diff: Optional complete PR diff in unified format
         include_diff: Whether to include the diff in the prompt (default: True)
         custom_scan_instructions: Optional custom security categories to append
-        
+        governance_context: Optional governance policy section to include
+
     Returns:
         Formatted prompt string
     """
@@ -37,6 +38,11 @@ NOTE: PR diff was omitted due to size constraints. Please use the file explorati
     custom_categories_section = ""
     if custom_scan_instructions:
         custom_categories_section = f"\n{custom_scan_instructions}\n"
+
+    # Add governance policy context if provided
+    governance_section = ""
+    if governance_context:
+        governance_section = f"\n{governance_context}\n"
     
     return f"""
 You are a senior security engineer conducting a focused security review of GitHub PR #{pr_data['number']}: "{pr_data['title']}"
@@ -99,7 +105,7 @@ SECURITY CATEGORIES TO EXAMINE:
 - PII handling violations
 - API endpoint data leakage
 - Debug information exposure
-{custom_categories_section}
+{custom_categories_section}{governance_section}
 Additional notes:
 - Even if something is only exploitable from the local network, it can still be a HIGH severity issue
 

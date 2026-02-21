@@ -25,6 +25,12 @@ from claudecode.constants import (
     EXIT_GENERAL_ERROR,
     SUBPROCESS_TIMEOUT
 )
+from claudecode.governance import (
+    load_governance_policy,
+    apply_severity_overrides,
+    apply_custom_rules,
+    format_governance_prompt_section,
+)
 from claudecode.logger import get_logger
 
 logger = get_logger(__name__)
@@ -577,9 +583,25 @@ def main():
         except Exception as e:
             print(json.dumps({'error': f'Failed to fetch PR data: {str(e)}'}))
             sys.exit(EXIT_GENERAL_ERROR)
-                
+
+        # Load governance policy if available
+        governance_policy = None
+        governance_context = None
+        governance_policy_path = os.environ.get('GOVERNANCE_POLICY_PATH', '.github/governance-policy.yaml')
+        repo_path = os.environ.get('REPO_PATH')
+        policy_base = Path(repo_path) if repo_path else Path.cwd()
+        policy_file = policy_base / governance_policy_path
+        governance_policy = load_governance_policy(policy_file)
+        if governance_policy:
+            governance_context = format_governance_prompt_section(governance_policy)
+            logger.info(f"Loaded governance policy: {governance_policy.name}")
+
         # Generate security audit prompt
-        prompt = get_security_audit_prompt(pr_data, pr_diff, custom_scan_instructions=custom_scan_instructions)
+        prompt = get_security_audit_prompt(
+            pr_data, pr_diff,
+            custom_scan_instructions=custom_scan_instructions,
+            governance_context=governance_context,
+        )
         
         # Run Claude Code security audit
         # Get repo directory from environment or use current directory
@@ -590,7 +612,11 @@ def main():
         # If prompt is too long, retry without diff
         if not success and error_msg == "PROMPT_TOO_LONG":
             print(f"[Info] Prompt too long, retrying without diff. Original prompt length: {len(prompt)} characters", file=sys.stderr)
-            prompt_without_diff = get_security_audit_prompt(pr_data, pr_diff, include_diff=False, custom_scan_instructions=custom_scan_instructions)
+            prompt_without_diff = get_security_audit_prompt(
+                pr_data, pr_diff, include_diff=False,
+                custom_scan_instructions=custom_scan_instructions,
+                governance_context=governance_context,
+            )
             print(f"[Info] New prompt length: {len(prompt_without_diff)} characters", file=sys.stderr)
             success, error_msg, results = claude_runner.run_security_audit(repo_dir, prompt_without_diff)
         
@@ -613,7 +639,22 @@ def main():
         kept_findings, excluded_findings, analysis_summary = apply_findings_filter(
             findings_filter, original_findings, pr_context, github_client
         )
-        
+
+        # Apply governance severity overrides and custom rules
+        governance_findings = []
+        governance_summary = None
+        if governance_policy:
+            kept_findings = apply_severity_overrides(kept_findings, governance_policy)
+            governance_findings = apply_custom_rules(pr_diff, governance_policy)
+            kept_findings = kept_findings + governance_findings
+            governance_summary = {
+                'policy_name': governance_policy.name,
+                'severity_overrides_count': len(governance_policy.severity_overrides),
+                'custom_rules_count': len(governance_policy.custom_rules),
+                'governance_findings_added': len(governance_findings),
+                'agent_governance_enabled': bool(governance_policy.agent_governance),
+            }
+
         # Prepare output
         output = {
             'pr_number': pr_number,
@@ -628,6 +669,8 @@ def main():
                 'excluded_findings_details': excluded_findings  # Include full details of what was filtered
             }
         }
+        if governance_summary:
+            output['governance_summary'] = governance_summary
         
         # Output JSON to stdout
         print(json.dumps(output, indent=2))

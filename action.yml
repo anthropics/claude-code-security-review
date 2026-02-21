@@ -48,6 +48,11 @@ inputs:
     required: false
     default: ''
 
+  governance-policy:
+    description: 'Path to governance policy YAML file (relative to repo root)'
+    required: false
+    default: '.github/governance-policy.yaml'
+
 outputs:
   findings-count:
     description: 'Number of security findings'
@@ -186,6 +191,7 @@ runs:
         EXCLUDE_DIRECTORIES: ${{ inputs.exclude-directories }}
         FALSE_POSITIVE_FILTERING_INSTRUCTIONS: ${{ inputs.false-positive-filtering-instructions }}
         CUSTOM_SECURITY_SCAN_INSTRUCTIONS: ${{ inputs.custom-security-scan-instructions }}
+        GOVERNANCE_POLICY_PATH: ${{ inputs.governance-policy }}
         CLAUDE_MODEL: ${{ inputs.claude-model }}
         CLAUDECODE_TIMEOUT: ${{ inputs.claudecode-timeout }}
         ACTION_PATH: ${{ github.action_path }}
