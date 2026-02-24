@@ -10,7 +10,7 @@ from anthropic import Anthropic
 
 from claudecode.constants import (
     DEFAULT_CLAUDE_MODEL, DEFAULT_TIMEOUT_SECONDS, DEFAULT_MAX_RETRIES,
-    RATE_LIMIT_BACKOFF_MAX, PROMPT_TOKEN_LIMIT,
+    RATE_LIMIT_BACKOFF_MAX, PROMPT_TOKEN_LIMIT, VALIDATION_MODEL,
 )
 from claudecode.json_parser import parse_json_with_fallbacks
 from claudecode.logger import get_logger
@@ -59,7 +59,7 @@ class ClaudeAPIClient:
         try:
             # Simple test call to verify API access
             self.client.messages.create(
-                model="claude-3-5-haiku-20241022",
+                model=VALIDATION_MODEL,
                 max_tokens=10,
                 messages=[{"role": "user", "content": "Hello"}],
                 timeout=10
