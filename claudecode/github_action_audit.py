@@ -417,6 +417,7 @@ def initialize_findings_filter(custom_filtering_instructions: Optional[str] = No
                 use_hard_exclusions=True,
                 use_claude_filtering=True,
                 api_key=api_key,
+                model=DEFAULT_CLAUDE_MODEL,
                 custom_filtering_instructions=custom_filtering_instructions
             )
         else:

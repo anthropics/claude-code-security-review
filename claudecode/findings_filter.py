@@ -188,6 +188,11 @@ class FindingsFilter:
                 valid, error = self.claude_client.validate_api_access()
                 if not valid:
                     logger.warning(f"Claude API validation failed: {error}")
+                    print(
+                        "::warning::Claude-based filtering is disabled due to "
+                        "API validation failure. All findings will be included "
+                        "without AI filtering."
+                    )
                     self.claude_client = None
                     self.use_claude_filtering = False
             except Exception as e:
