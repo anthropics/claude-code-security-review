@@ -81,6 +81,15 @@ SECURITY CATEGORIES TO EXAMINE:
 - API endpoint data leakage
 - Debug information exposure
 
+**Dependency & Supply Chain Security:**
+- Known vulnerable dependencies (CVEs in pinned versions in manifest files)
+- Unpinned or loosely pinned dependency versions (e.g. `*`, `latest`, `>=` without upper bound)
+- Dependencies from untrusted or non-standard registries
+- Typosquatting risks in package names (e.g. misspelled popular packages)
+- Dependency confusion (private vs public namespace conflicts)
+- Malicious post-install scripts in dependency manifests
+- Lock file integrity issues (missing, inconsistent, or uncommitted lock files)
+
 Additional notes:
 - Even if something is only exploitable from the local network, it can still be a HIGH severity issue
 

@@ -323,3 +323,52 @@ diff --git a/émojis.py b/émojis.py
         assert "émoji-user" in prompt
         assert "émojis.py" in prompt
         assert "🚨" in prompt  # From diff
+
+    def test_get_security_audit_prompt_contains_supply_chain_category(self):
+        """Test that the prompt includes the Dependency & Supply Chain Security category."""
+        pr_data = {
+            "number": 1,
+            "title": "Update dependencies",
+            "body": "Bumping versions",
+            "user": "bot",
+            "changed_files": 1,
+            "additions": 1,
+            "deletions": 1,
+            "head": {"repo": {"full_name": "owner/repo"}},
+            "files": [{"filename": "package.json", "status": "modified",
+                        "additions": 1, "deletions": 1}]
+        }
+
+        prompt = get_security_audit_prompt(pr_data)
+
+        assert "Dependency & Supply Chain Security" in prompt
+        assert "typosquatting" in prompt.lower()
+        assert "dependency confusion" in prompt.lower()
+        assert "lock file" in prompt.lower()
+        assert "post-install scripts" in prompt.lower()
+
+    def test_get_security_audit_prompt_supply_chain_with_custom_instructions(self):
+        """Test that custom_scan_instructions still injects after the supply chain category."""
+        pr_data = {
+            "number": 2,
+            "title": "Test",
+            "body": "",
+            "user": "user",
+            "changed_files": 1,
+            "additions": 1,
+            "deletions": 0,
+            "head": {"repo": {"full_name": "owner/repo"}},
+            "files": [{"filename": "app.py", "status": "modified",
+                        "additions": 1, "deletions": 0}]
+        }
+
+        custom = "**Custom Category:**\n- Custom check item"
+        prompt = get_security_audit_prompt(pr_data, custom_scan_instructions=custom)
+
+        # Both should be present
+        assert "Dependency & Supply Chain Security" in prompt
+        assert "Custom Category:" in prompt
+        # Custom instructions should appear after supply chain
+        supply_chain_pos = prompt.index("Dependency & Supply Chain Security")
+        custom_pos = prompt.index("Custom Category:")
+        assert custom_pos > supply_chain_pos
