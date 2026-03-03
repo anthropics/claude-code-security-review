@@ -497,6 +497,531 @@ describe('comment-pr-findings.js', () => {
     });
   });
 
+  describe('Per-finding Deduplication', () => {
+    test('should skip all findings when all are already commented', async () => {
+      const mockFindings = [{
+        file: 'test.py',
+        line: 10,
+        description: 'SQL injection detected',
+        severity: 'HIGH',
+        category: 'injection'
+      }];
+
+      const existingComments = [{
+        id: 1,
+        path: 'test.py',
+        line: 10,
+        body: '🤖 **Security Issue: SQL injection detected**\n\n**Severity:** HIGH\n**Category:** injection\n**Tool:** ClaudeCode AI Security Analysis\n',
+        user: { type: 'Bot' }
+      }];
+
+      readFileSyncSpy.mockImplementation((path) => {
+        if (path.includes('github-event.json')) {
+          return JSON.stringify({
+            pull_request: { number: 123, head: { sha: 'abc123' } }
+          });
+        }
+        if (path === 'findings.json') {
+          return JSON.stringify(mockFindings);
+        }
+      });
+
+      spawnSyncSpy.mockImplementation((cmd, args, options) => {
+        if (cmd === 'gh' && args.includes('api')) {
+          const endpoint = args[1];
+          const method = args[args.indexOf('--method') + 1] || 'GET';
+
+          if (endpoint.includes('/pulls/123/files')) {
+            return { status: 0, stdout: JSON.stringify([{ filename: 'test.py' }]), stderr: '' };
+          }
+          if (endpoint.includes('/pulls/123/comments') && method === 'GET') {
+            return { status: 0, stdout: JSON.stringify(existingComments), stderr: '' };
+          }
+          return { status: 0, stdout: '{}', stderr: '' };
+        }
+        return { status: 0, stdout: '{}', stderr: '' };
+      });
+
+      await import('./comment-pr-findings.js');
+
+      const logCalls = consoleLogSpy.mock.calls.map(c => c[0]);
+      expect(logCalls).toContain('Skipping duplicate finding on test.py:10');
+      expect(logCalls).toContain('All findings already commented, skipping to avoid duplicates');
+    });
+
+    test('should post only new findings when some already exist', async () => {
+      const mockFindings = [
+        { file: 'test.py', line: 10, description: 'SQL injection detected', severity: 'HIGH', category: 'injection' },
+        { file: 'app.py', line: 25, description: 'XSS vulnerability found', severity: 'MEDIUM', category: 'xss' }
+      ];
+
+      const existingComments = [{
+        id: 1,
+        path: 'test.py',
+        line: 10,
+        body: '🤖 **Security Issue: SQL injection detected**\n\n**Severity:** HIGH\n',
+        user: { type: 'Bot' }
+      }];
+
+      readFileSyncSpy.mockImplementation((path) => {
+        if (path.includes('github-event.json')) {
+          return JSON.stringify({
+            pull_request: { number: 123, head: { sha: 'abc123' } }
+          });
+        }
+        if (path === 'findings.json') {
+          return JSON.stringify(mockFindings);
+        }
+      });
+
+      let capturedReviewData;
+      spawnSyncSpy.mockImplementation((cmd, args, options) => {
+        if (cmd === 'gh' && args.includes('api')) {
+          const endpoint = args[1];
+          const method = args[args.indexOf('--method') + 1] || 'GET';
+
+          if (endpoint.includes('/pulls/123/files')) {
+            return { status: 0, stdout: JSON.stringify([
+              { filename: 'test.py' },
+              { filename: 'app.py' }
+            ]), stderr: '' };
+          }
+          if (endpoint.includes('/pulls/123/comments') && method === 'GET') {
+            return { status: 0, stdout: JSON.stringify(existingComments), stderr: '' };
+          }
+          if (endpoint.includes('/pulls/123/reviews') && method === 'POST') {
+            if (options && options.input) {
+              capturedReviewData = JSON.parse(options.input);
+            }
+            return { status: 0, stdout: '{}', stderr: '' };
+          }
+          return { status: 0, stdout: '{}', stderr: '' };
+        }
+        return { status: 0, stdout: '{}', stderr: '' };
+      });
+
+      await import('./comment-pr-findings.js');
+
+      const logCalls = consoleLogSpy.mock.calls.map(c => c[0]);
+      expect(logCalls).toContain('Skipping duplicate finding on test.py:10');
+      expect(logCalls).toContain('Posting 1 new finding(s) (1 duplicate(s) skipped)');
+      expect(capturedReviewData).toBeDefined();
+      expect(capturedReviewData.comments).toHaveLength(1);
+      expect(capturedReviewData.comments[0].path).toBe('app.py');
+      expect(capturedReviewData.comments[0].body).toContain('XSS vulnerability found');
+    });
+
+    test('should not treat non-security comments as duplicates', async () => {
+      const mockFindings = [{
+        file: 'test.py',
+        line: 10,
+        description: 'SQL injection detected',
+        severity: 'HIGH',
+        category: 'injection'
+      }];
+
+      const existingComments = [{
+        id: 1,
+        path: 'test.py',
+        line: 10,
+        body: 'Regular review comment - looks good!',
+        user: { type: 'User' }
+      }];
+
+      readFileSyncSpy.mockImplementation((path) => {
+        if (path.includes('github-event.json')) {
+          return JSON.stringify({
+            pull_request: { number: 123, head: { sha: 'abc123' } }
+          });
+        }
+        if (path === 'findings.json') {
+          return JSON.stringify(mockFindings);
+        }
+      });
+
+      let capturedReviewData;
+      spawnSyncSpy.mockImplementation((cmd, args, options) => {
+        if (cmd === 'gh' && args.includes('api')) {
+          const endpoint = args[1];
+          const method = args[args.indexOf('--method') + 1] || 'GET';
+
+          if (endpoint.includes('/pulls/123/files')) {
+            return { status: 0, stdout: JSON.stringify([{ filename: 'test.py' }]), stderr: '' };
+          }
+          if (endpoint.includes('/pulls/123/comments') && method === 'GET') {
+            return { status: 0, stdout: JSON.stringify(existingComments), stderr: '' };
+          }
+          if (endpoint.includes('/pulls/123/reviews') && method === 'POST') {
+            if (options && options.input) {
+              capturedReviewData = JSON.parse(options.input);
+            }
+            return { status: 0, stdout: '{}', stderr: '' };
+          }
+          return { status: 0, stdout: '{}', stderr: '' };
+        }
+        return { status: 0, stdout: '{}', stderr: '' };
+      });
+
+      await import('./comment-pr-findings.js');
+
+      expect(capturedReviewData).toBeDefined();
+      expect(capturedReviewData.comments).toHaveLength(1);
+      const logCalls = consoleLogSpy.mock.calls.map(c => c[0]);
+      expect(logCalls).toContain('Created review with 1 inline comments');
+    });
+
+    test('should allow same message on different files', async () => {
+      const mockFindings = [
+        { file: 'a.py', line: 5, description: 'Hardcoded secret', severity: 'HIGH', category: 'secret' },
+        { file: 'b.py', line: 5, description: 'Hardcoded secret', severity: 'HIGH', category: 'secret' }
+      ];
+
+      const existingComments = [{
+        id: 1,
+        path: 'a.py',
+        line: 5,
+        body: '🤖 **Security Issue: Hardcoded secret**\n\n**Severity:** HIGH\n',
+        user: { type: 'Bot' }
+      }];
+
+      readFileSyncSpy.mockImplementation((path) => {
+        if (path.includes('github-event.json')) {
+          return JSON.stringify({
+            pull_request: { number: 123, head: { sha: 'abc123' } }
+          });
+        }
+        if (path === 'findings.json') {
+          return JSON.stringify(mockFindings);
+        }
+      });
+
+      let capturedReviewData;
+      spawnSyncSpy.mockImplementation((cmd, args, options) => {
+        if (cmd === 'gh' && args.includes('api')) {
+          const endpoint = args[1];
+          const method = args[args.indexOf('--method') + 1] || 'GET';
+
+          if (endpoint.includes('/pulls/123/files')) {
+            return { status: 0, stdout: JSON.stringify([
+              { filename: 'a.py' },
+              { filename: 'b.py' }
+            ]), stderr: '' };
+          }
+          if (endpoint.includes('/pulls/123/comments') && method === 'GET') {
+            return { status: 0, stdout: JSON.stringify(existingComments), stderr: '' };
+          }
+          if (endpoint.includes('/pulls/123/reviews') && method === 'POST') {
+            if (options && options.input) {
+              capturedReviewData = JSON.parse(options.input);
+            }
+            return { status: 0, stdout: '{}', stderr: '' };
+          }
+          return { status: 0, stdout: '{}', stderr: '' };
+        }
+        return { status: 0, stdout: '{}', stderr: '' };
+      });
+
+      await import('./comment-pr-findings.js');
+
+      const logCalls = consoleLogSpy.mock.calls.map(c => c[0]);
+      expect(logCalls).toContain('Skipping duplicate finding on a.py:5');
+      expect(capturedReviewData).toBeDefined();
+      expect(capturedReviewData.comments).toHaveLength(1);
+      expect(capturedReviewData.comments[0].path).toBe('b.py');
+    });
+
+    test('should allow same file and message on different lines', async () => {
+      const mockFindings = [
+        { file: 'test.py', line: 10, description: 'Hardcoded secret', severity: 'HIGH', category: 'secret' },
+        { file: 'test.py', line: 50, description: 'Hardcoded secret', severity: 'HIGH', category: 'secret' }
+      ];
+
+      const existingComments = [{
+        id: 1,
+        path: 'test.py',
+        line: 10,
+        body: '🤖 **Security Issue: Hardcoded secret**\n\n**Severity:** HIGH\n',
+        user: { type: 'Bot' }
+      }];
+
+      readFileSyncSpy.mockImplementation((path) => {
+        if (path.includes('github-event.json')) {
+          return JSON.stringify({
+            pull_request: { number: 123, head: { sha: 'abc123' } }
+          });
+        }
+        if (path === 'findings.json') {
+          return JSON.stringify(mockFindings);
+        }
+      });
+
+      let capturedReviewData;
+      spawnSyncSpy.mockImplementation((cmd, args, options) => {
+        if (cmd === 'gh' && args.includes('api')) {
+          const endpoint = args[1];
+          const method = args[args.indexOf('--method') + 1] || 'GET';
+
+          if (endpoint.includes('/pulls/123/files')) {
+            return { status: 0, stdout: JSON.stringify([{ filename: 'test.py' }]), stderr: '' };
+          }
+          if (endpoint.includes('/pulls/123/comments') && method === 'GET') {
+            return { status: 0, stdout: JSON.stringify(existingComments), stderr: '' };
+          }
+          if (endpoint.includes('/pulls/123/reviews') && method === 'POST') {
+            if (options && options.input) {
+              capturedReviewData = JSON.parse(options.input);
+            }
+            return { status: 0, stdout: '{}', stderr: '' };
+          }
+          return { status: 0, stdout: '{}', stderr: '' };
+        }
+        return { status: 0, stdout: '{}', stderr: '' };
+      });
+
+      await import('./comment-pr-findings.js');
+
+      const logCalls = consoleLogSpy.mock.calls.map(c => c[0]);
+      expect(logCalls).toContain('Skipping duplicate finding on test.py:10');
+      expect(capturedReviewData).toBeDefined();
+      expect(capturedReviewData.comments).toHaveLength(1);
+      expect(capturedReviewData.comments[0].line).toBe(50);
+    });
+
+    test('should use original_line for fingerprint when line is missing', async () => {
+      const mockFindings = [{
+        file: 'test.py',
+        line: 10,
+        description: 'SQL injection detected',
+        severity: 'HIGH',
+        category: 'injection'
+      }];
+
+      const existingComments = [{
+        id: 1,
+        path: 'test.py',
+        original_line: 10,
+        body: '🤖 **Security Issue: SQL injection detected**\n\n**Severity:** HIGH\n',
+        user: { type: 'Bot' }
+      }];
+
+      readFileSyncSpy.mockImplementation((path) => {
+        if (path.includes('github-event.json')) {
+          return JSON.stringify({
+            pull_request: { number: 123, head: { sha: 'abc123' } }
+          });
+        }
+        if (path === 'findings.json') {
+          return JSON.stringify(mockFindings);
+        }
+      });
+
+      spawnSyncSpy.mockImplementation((cmd, args, options) => {
+        if (cmd === 'gh' && args.includes('api')) {
+          const endpoint = args[1];
+          const method = args[args.indexOf('--method') + 1] || 'GET';
+
+          if (endpoint.includes('/pulls/123/files')) {
+            return { status: 0, stdout: JSON.stringify([{ filename: 'test.py' }]), stderr: '' };
+          }
+          if (endpoint.includes('/pulls/123/comments') && method === 'GET') {
+            return { status: 0, stdout: JSON.stringify(existingComments), stderr: '' };
+          }
+          return { status: 0, stdout: '{}', stderr: '' };
+        }
+        return { status: 0, stdout: '{}', stderr: '' };
+      });
+
+      await import('./comment-pr-findings.js');
+
+      const logCalls = consoleLogSpy.mock.calls.map(c => c[0]);
+      expect(logCalls).toContain('Skipping duplicate finding on test.py:10');
+      expect(logCalls).toContain('All findings already commented, skipping to avoid duplicates');
+    });
+  });
+
+  describe('Paginated Comment Fetching', () => {
+    test('should fetch multiple pages to find existing security comments', async () => {
+      const mockFindings = [{
+        file: 'test.py',
+        line: 10,
+        description: 'SQL injection detected',
+        severity: 'HIGH',
+        category: 'injection'
+      }];
+
+      const page1Comments = Array.from({ length: 100 }, (_, i) => ({
+        id: i + 1,
+        path: 'other.py',
+        line: i + 1,
+        body: `Regular comment ${i + 1}`,
+        user: { type: 'User' }
+      }));
+
+      const page2Comments = [{
+        id: 200,
+        path: 'test.py',
+        line: 10,
+        body: '🤖 **Security Issue: SQL injection detected**\n\n**Severity:** HIGH\n',
+        user: { type: 'Bot' }
+      }];
+
+      readFileSyncSpy.mockImplementation((path) => {
+        if (path.includes('github-event.json')) {
+          return JSON.stringify({
+            pull_request: { number: 123, head: { sha: 'abc123' } }
+          });
+        }
+        if (path === 'findings.json') {
+          return JSON.stringify(mockFindings);
+        }
+      });
+
+      spawnSyncSpy.mockImplementation((cmd, args, options) => {
+        if (cmd === 'gh' && args.includes('api')) {
+          const endpoint = args[1];
+          const method = args[args.indexOf('--method') + 1] || 'GET';
+
+          if (endpoint.includes('/pulls/123/files')) {
+            return { status: 0, stdout: JSON.stringify([{ filename: 'test.py' }]), stderr: '' };
+          }
+          if (endpoint.includes('/pulls/123/comments') && method === 'GET') {
+            if (endpoint.includes('&page=1')) {
+              return { status: 0, stdout: JSON.stringify(page1Comments), stderr: '' };
+            }
+            if (endpoint.includes('&page=2')) {
+              return { status: 0, stdout: JSON.stringify(page2Comments), stderr: '' };
+            }
+            return { status: 0, stdout: '[]', stderr: '' };
+          }
+          return { status: 0, stdout: '{}', stderr: '' };
+        }
+        return { status: 0, stdout: '{}', stderr: '' };
+      });
+
+      await import('./comment-pr-findings.js');
+
+      const logCalls = consoleLogSpy.mock.calls.map(c => c[0]);
+      expect(logCalls).toContain('Skipping duplicate finding on test.py:10');
+      expect(logCalls).toContain('All findings already commented, skipping to avoid duplicates');
+    });
+
+    test('should stop paginating when a page has fewer than 100 items', async () => {
+      const mockFindings = [{
+        file: 'test.py',
+        line: 10,
+        description: 'New finding',
+        severity: 'HIGH',
+        category: 'injection'
+      }];
+
+      const page1Comments = Array.from({ length: 50 }, (_, i) => ({
+        id: i + 1,
+        path: 'other.py',
+        line: i + 1,
+        body: `Regular comment ${i + 1}`,
+        user: { type: 'User' }
+      }));
+
+      readFileSyncSpy.mockImplementation((path) => {
+        if (path.includes('github-event.json')) {
+          return JSON.stringify({
+            pull_request: { number: 123, head: { sha: 'abc123' } }
+          });
+        }
+        if (path === 'findings.json') {
+          return JSON.stringify(mockFindings);
+        }
+      });
+
+      const pagesRequested = [];
+      let capturedReviewData;
+      spawnSyncSpy.mockImplementation((cmd, args, options) => {
+        if (cmd === 'gh' && args.includes('api')) {
+          const endpoint = args[1];
+          const method = args[args.indexOf('--method') + 1] || 'GET';
+
+          if (endpoint.includes('/pulls/123/files')) {
+            return { status: 0, stdout: JSON.stringify([{ filename: 'test.py' }]), stderr: '' };
+          }
+          if (endpoint.includes('/pulls/123/comments') && method === 'GET') {
+            const pageMatch = endpoint.match(/&page=(\d+)/);
+            if (pageMatch) pagesRequested.push(parseInt(pageMatch[1]));
+
+            if (endpoint.includes('&page=1')) {
+              return { status: 0, stdout: JSON.stringify(page1Comments), stderr: '' };
+            }
+            return { status: 0, stdout: '[]', stderr: '' };
+          }
+          if (endpoint.includes('/pulls/123/reviews') && method === 'POST') {
+            if (options && options.input) {
+              capturedReviewData = JSON.parse(options.input);
+            }
+            return { status: 0, stdout: '{}', stderr: '' };
+          }
+          return { status: 0, stdout: '{}', stderr: '' };
+        }
+        return { status: 0, stdout: '{}', stderr: '' };
+      });
+
+      await import('./comment-pr-findings.js');
+
+      expect(pagesRequested).toEqual([1]);
+      expect(capturedReviewData).toBeDefined();
+      expect(capturedReviewData.comments).toHaveLength(1);
+    });
+
+    test('should handle empty comment list on first page', async () => {
+      const mockFindings = [{
+        file: 'test.py',
+        line: 10,
+        description: 'New finding',
+        severity: 'HIGH',
+        category: 'injection'
+      }];
+
+      readFileSyncSpy.mockImplementation((path) => {
+        if (path.includes('github-event.json')) {
+          return JSON.stringify({
+            pull_request: { number: 123, head: { sha: 'abc123' } }
+          });
+        }
+        if (path === 'findings.json') {
+          return JSON.stringify(mockFindings);
+        }
+      });
+
+      let capturedReviewData;
+      spawnSyncSpy.mockImplementation((cmd, args, options) => {
+        if (cmd === 'gh' && args.includes('api')) {
+          const endpoint = args[1];
+          const method = args[args.indexOf('--method') + 1] || 'GET';
+
+          if (endpoint.includes('/pulls/123/files')) {
+            return { status: 0, stdout: JSON.stringify([{ filename: 'test.py' }]), stderr: '' };
+          }
+          if (endpoint.includes('/pulls/123/comments') && method === 'GET') {
+            return { status: 0, stdout: '[]', stderr: '' };
+          }
+          if (endpoint.includes('/pulls/123/reviews') && method === 'POST') {
+            if (options && options.input) {
+              capturedReviewData = JSON.parse(options.input);
+            }
+            return { status: 0, stdout: '{}', stderr: '' };
+          }
+          return { status: 0, stdout: '{}', stderr: '' };
+        }
+        return { status: 0, stdout: '{}', stderr: '' };
+      });
+
+      await import('./comment-pr-findings.js');
+
+      const logCalls = consoleLogSpy.mock.calls.map(c => c[0]);
+      expect(logCalls).toContain('Posting 1 new finding(s) (0 duplicate(s) skipped)');
+      expect(capturedReviewData).toBeDefined();
+      expect(capturedReviewData.comments).toHaveLength(1);
+    });
+  });
+
   describe('Error Handling', () => {
     test('should handle GitHub API errors gracefully', async () => {
      

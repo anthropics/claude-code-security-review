@@ -53,6 +53,27 @@ function ghApi(endpoint, method = 'GET', data = null) {
   }
 }
 
+// Paginated GitHub API helper — fetches all pages for list endpoints
+function ghApiAll(baseEndpoint) {
+  const allItems = [];
+  let page = 1;
+  const separator = baseEndpoint.includes('?') ? '&' : '?';
+
+  while (true) {
+    const endpoint = `${baseEndpoint}${separator}per_page=100&page=${page}`;
+    const items = ghApi(endpoint);
+
+    if (!Array.isArray(items) || items.length === 0) break;
+
+    allItems.push(...items);
+
+    if (items.length < 100) break;
+    page++;
+  }
+
+  return allItems;
+}
+
 // Helper function to add reactions to a comment
 function addReactionsToComment(commentId, isReviewComment = true) {
   const reactions = ['+1', '-1']; // thumbs up and thumbs down
@@ -173,19 +194,43 @@ async function run() {
       return;
     }
     
-    // Check for existing review comments to avoid duplicates
-    const comments = ghApi(`/repos/${context.repo.owner}/${context.repo.repo}/pulls/${context.issue.number}/comments`);
-    
-    // Check if we've already commented on these findings
-    const existingSecurityComments = comments.filter(comment => 
-      comment.user.type === 'Bot' && 
-      comment.body && comment.body.includes('🤖 **Security Issue:')
-    );
-    
-    if (existingSecurityComments.length > 0) {
-      console.log(`Found ${existingSecurityComments.length} existing security comments, skipping to avoid duplicates`);
+    // Fetch all existing PR review comments (paginated) to deduplicate per finding
+    const allComments = ghApiAll(`/repos/${context.repo.owner}/${context.repo.repo}/pulls/${context.issue.number}/comments`);
+
+    // Build a set of fingerprints from existing security comments (file:line:message)
+    const existingFingerprints = new Set();
+    for (const comment of allComments) {
+      if (comment.body && comment.body.includes('🤖 **Security Issue:')) {
+        const path = comment.path || '';
+        const line = comment.line || comment.original_line || '';
+        // Extract the message from the comment body header line
+        const match = comment.body.match(/🤖 \*\*Security Issue: (.+?)\*\*/);
+        const msg = match ? match[1] : '';
+        existingFingerprints.add(`${path}:${line}:${msg}`);
+      }
+    }
+
+    // Filter out findings that already have a matching comment
+    const newReviewComments = reviewComments.filter(rc => {
+      const match = rc.body.match(/🤖 \*\*Security Issue: (.+?)\*\*/);
+      const msg = match ? match[1] : '';
+      const fingerprint = `${rc.path}:${rc.line}:${msg}`;
+      if (existingFingerprints.has(fingerprint)) {
+        console.log(`Skipping duplicate finding on ${rc.path}:${rc.line}`);
+        return false;
+      }
+      return true;
+    });
+
+    if (newReviewComments.length === 0) {
+      console.log('All findings already commented, skipping to avoid duplicates');
       return;
     }
+
+    console.log(`Posting ${newReviewComments.length} new finding(s) (${reviewComments.length - newReviewComments.length} duplicate(s) skipped)`);
+    // Replace the original reviewComments with the deduplicated list
+    reviewComments.length = 0;
+    reviewComments.push(...newReviewComments);
         
     try {
       // Create a review with all the comments
