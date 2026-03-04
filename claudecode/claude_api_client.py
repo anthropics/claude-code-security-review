@@ -311,43 +311,63 @@ Respond with EXACTLY this JSON structure (no markdown, no code blocks):
 
     
     def _read_file(self, file_path: str) -> Tuple[bool, str, str]:
-        """Read a file and format it with line numbers.
-        
+        """Read a file, ensuring the resolved path stays within the repository root.
+
+        Prevents path-traversal attacks where a malicious finding could reference
+        paths like ``../../../etc/shadow`` to exfiltrate sensitive files from the
+        CI runner.  Both ``..`` segments and symlinks that escape the root are
+        caught by resolving to a real, absolute path before any I/O.
+
         Args:
-            file_path: Path to the file to read
-            
+            file_path: Path to the file to read (relative to REPO_PATH or cwd).
+
         Returns:
             Tuple of (success, formatted_content, error_message)
         """
         try:
-            # Check if REPO_PATH is set and use it as base path
+            # Reject obviously malicious input early
+            if not file_path or file_path.strip() == '':
+                return False, "", "Empty file path"
+
+            # Absolute paths from untrusted findings are never legitimate
+            if os.path.isabs(file_path):
+                return False, "", f"Absolute paths are not allowed: {file_path}"
+
+            # Determine the repository root directory
             repo_path = os.environ.get('REPO_PATH')
-            if repo_path:
-                # Convert file_path to Path and check if it's absolute
-                path = Path(file_path)
-                if not path.is_absolute():
-                    # Make it relative to REPO_PATH
-                    path = Path(repo_path) / file_path
-            else:
-                path = Path(file_path)
-            
-            if not path.exists():
-                return False, "", f"File not found: {path}"
-            
-            if not path.is_file():
-                return False, "", f"Path is not a file: {path}"
-            
+            root = os.path.realpath(repo_path) if repo_path else os.path.realpath(os.getcwd())
+
+            # Resolve the candidate path *after* joining, which collapses any
+            # ".." segments and follows symlinks to their true destination.
+            candidate = os.path.realpath(os.path.join(root, file_path))
+
+            # The resolved path must be equal to or nested inside the root.
+            # Using ``os.sep`` prevents partial-prefix false positives
+            # (e.g. /repo-data matching /repo).
+            if candidate != root and not candidate.startswith(root + os.sep):
+                logger.warning(
+                    "Path traversal blocked: '%s' resolved to '%s' (root: '%s')",
+                    file_path, candidate, root,
+                )
+                return False, "", f"Path '{file_path}' resolves outside the repository root"
+
+            if not os.path.exists(candidate):
+                return False, "", f"File not found: {candidate}"
+
+            if not os.path.isfile(candidate):
+                return False, "", f"Path is not a file: {candidate}"
+
             # Read file with error handling for encoding issues
             try:
-                with open(path, 'r', encoding='utf-8') as f:
+                with open(candidate, 'r', encoding='utf-8') as f:
                     content = f.read()
             except UnicodeDecodeError:
                 # Try with latin-1 encoding as fallback
-                with open(path, 'r', encoding='latin-1') as f:
+                with open(candidate, 'r', encoding='latin-1') as f:
                     content = f.read()
-            
+
             return True, content, ""
-            
+
         except Exception as e:
             error_msg = f"Error reading file {file_path}: {str(e)}"
             logger.error(error_msg)
