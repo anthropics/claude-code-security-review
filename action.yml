@@ -265,8 +265,16 @@ runs:
             echo "ClaudeCode results preview:"
             head -n 300 claudecode/claudecode-results.json || echo "Unable to preview results"
                         
+            # Check if the scan was incomplete (e.g., diff too large)
+            if jq -e '.scan_status == "incomplete"' claudecode/claudecode-results.json > /dev/null 2>&1; then
+              ERROR_MSG=$(jq -r '.error' claudecode/claudecode-results.json)
+              SKIP_REASON=$(jq -r '.analysis_summary.skip_reason // "unknown"' claudecode/claudecode-results.json)
+              echo "::error::Security scan incomplete: $ERROR_MSG"
+              echo "::error::The PR diff exceeded GitHub's 20,000-line API limit and local git diff fallback also failed. Security review was NOT performed."
+              echo "findings_count=0" >> $GITHUB_OUTPUT
+              echo "scan_status=incomplete" >> $GITHUB_OUTPUT
             # Check if the result is an error
-            if jq -e '.error' claudecode/claudecode-results.json > /dev/null 2>&1; then
+            elif jq -e '.error' claudecode/claudecode-results.json > /dev/null 2>&1; then
               ERROR_MSG=$(jq -r '.error' claudecode/claudecode-results.json)
               echo "::warning::ClaudeCode error: $ERROR_MSG"
               echo "findings_count=0" >> $GITHUB_OUTPUT
