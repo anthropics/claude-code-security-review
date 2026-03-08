@@ -37,6 +37,10 @@ class AuditError(ValueError):
     """Raised when security audit operations fail."""
     pass
 
+class DiffTooLargeError(Exception):
+    """Raised when the PR diff exceeds GitHub's API size limit."""
+    pass
+
 class GitHubActionClient:
     """Simplified GitHub API client for GitHub Actions environment."""
     
@@ -116,24 +120,95 @@ class GitHubActionClient:
             'changed_files': pr_data['changed_files']
         }
     
-    def get_pr_diff(self, repo_name: str, pr_number: int) -> str:
+    def get_pr_diff(self, repo_name: str, pr_number: int, base_ref: str = None) -> str:
         """Get complete PR diff in unified format.
-        
+
+        First attempts to fetch the diff via the GitHub API. If the API returns
+        HTTP 406 (diff too large, exceeds GitHub's 20,000-line limit), falls back
+        to running ``git diff`` locally against the base branch.
+
         Args:
             repo_name: Repository name in format "owner/repo"
             pr_number: Pull request number
-            
+            base_ref: Base branch ref for local git diff fallback (e.g. "main")
+
         Returns:
             Complete PR diff in unified format
+
+        Raises:
+            DiffTooLargeError: If both the API and local git diff fail
         """
         url = f"https://api.github.com/repos/{repo_name}/pulls/{pr_number}"
         headers = dict(self.headers)
         headers['Accept'] = 'application/vnd.github.diff'
-        
+
         response = requests.get(url, headers=headers)
+
+        if response.status_code == 406:
+            # GitHub API returns 406 when the diff exceeds 20,000 lines
+            print(f"[Warning] GitHub API returned 406: PR diff too large for API "
+                  f"(exceeds 20,000-line limit). Falling back to local git diff.",
+                  file=sys.stderr)
+            return self._get_local_diff(base_ref)
+
         response.raise_for_status()
-        
+
         return self._filter_generated_files(response.text)
+
+    def _get_local_diff(self, base_ref: str = None) -> str:
+        """Fall back to local git diff when the GitHub API cannot return the diff.
+
+        The GitHub Action checks out the repository with fetch-depth: 2 at minimum,
+        so we can compute the diff locally.
+
+        Args:
+            base_ref: Base branch ref to diff against. If not provided, diffs
+                      against HEAD~1.
+
+        Returns:
+            Filtered diff text from local git
+
+        Raises:
+            DiffTooLargeError: If the local git diff also fails
+        """
+        repo_path = os.environ.get('REPO_PATH', os.getcwd())
+
+        # Try diffing against the base branch first, then fall back to HEAD~1
+        diff_targets = []
+        if base_ref:
+            diff_targets.append(f"origin/{base_ref}...HEAD")
+        diff_targets.append("HEAD~1")
+
+        last_error = None
+        for target in diff_targets:
+            try:
+                cmd = ['git', 'diff', target]
+                result = subprocess.run(
+                    cmd,
+                    cwd=repo_path,
+                    capture_output=True,
+                    text=True,
+                    timeout=120
+                )
+                if result.returncode == 0 and result.stdout.strip():
+                    print(f"[Info] Successfully obtained diff using: git diff {target}",
+                          file=sys.stderr)
+                    return self._filter_generated_files(result.stdout)
+                elif result.returncode != 0:
+                    last_error = result.stderr
+                    print(f"[Warning] git diff {target} failed: {result.stderr.strip()}",
+                          file=sys.stderr)
+            except subprocess.TimeoutExpired:
+                last_error = "git diff timed out"
+                print(f"[Warning] git diff {target} timed out", file=sys.stderr)
+            except Exception as e:
+                last_error = str(e)
+                print(f"[Warning] git diff {target} error: {e}", file=sys.stderr)
+
+        raise DiffTooLargeError(
+            f"PR diff exceeds GitHub API limit (20,000 lines) and local git diff "
+            f"also failed: {last_error}"
+        )
     
     def _is_excluded(self, filepath: str) -> bool:
         """Check if a file should be excluded based on directory patterns."""
@@ -573,9 +648,32 @@ def main():
         # Get PR data
         try:
             pr_data = github_client.get_pr_data(repo_name, pr_number)
-            pr_diff = github_client.get_pr_diff(repo_name, pr_number)
         except Exception as e:
             print(json.dumps({'error': f'Failed to fetch PR data: {str(e)}'}))
+            sys.exit(EXIT_GENERAL_ERROR)
+
+        # Get PR diff (with fallback to local git diff for large PRs)
+        base_ref = pr_data.get('base', {}).get('ref')
+        try:
+            pr_diff = github_client.get_pr_diff(repo_name, pr_number, base_ref=base_ref)
+        except DiffTooLargeError as e:
+            # Both GitHub API and local git diff failed - surface this clearly
+            error_output = {
+                'error': f'Diff too large: {str(e)}',
+                'scan_status': 'incomplete',
+                'pr_number': pr_number,
+                'repo': repo_name,
+                'findings': [],
+                'analysis_summary': {
+                    'files_reviewed': 0,
+                    'review_completed': False,
+                    'skip_reason': 'diff_too_large'
+                }
+            }
+            print(json.dumps(error_output, indent=2))
+            sys.exit(EXIT_GENERAL_ERROR)
+        except Exception as e:
+            print(json.dumps({'error': f'Failed to fetch PR diff: {str(e)}'}))
             sys.exit(EXIT_GENERAL_ERROR)
                 
         # Generate security audit prompt

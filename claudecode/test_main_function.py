@@ -9,7 +9,7 @@ import os
 from unittest.mock import Mock, patch
 from pathlib import Path
 
-from claudecode.github_action_audit import main
+from claudecode.github_action_audit import main, DiffTooLargeError
 
 
 class TestMainFunction:
@@ -187,13 +187,13 @@ class TestMainFunction:
         mock_client = Mock()
         mock_client.get_pr_data.side_effect = Exception("API error")
         mock_client_class.return_value = mock_client
-        
+
         mock_runner = Mock()
         mock_runner.validate_claude_available.return_value = (True, "")
         mock_runner_class.return_value = mock_runner
-        
+
         mock_filter_class.return_value = Mock()
-        
+
         with patch.dict(os.environ, {
             'GITHUB_REPOSITORY': 'owner/repo',
             'PR_NUMBER': '123',
@@ -201,13 +201,58 @@ class TestMainFunction:
         }):
             with pytest.raises(SystemExit) as exc_info:
                 main()
-            
+
             assert exc_info.value.code == 1  # API error, exit 1
-            
+
             captured = capsys.readouterr()
             output = json.loads(captured.out)
             assert 'Failed to fetch PR data' in output['error']
             assert 'API error' in output['error']
+
+    @patch('claudecode.github_action_audit.get_security_audit_prompt')
+    @patch('claudecode.github_action_audit.FindingsFilter')
+    @patch('claudecode.github_action_audit.SimpleClaudeRunner')
+    @patch('claudecode.github_action_audit.GitHubActionClient')
+    def test_main_diff_too_large_error(self, mock_client_class, mock_runner_class,
+                                       mock_filter_class, mock_prompt_func, capsys):
+        """Test that DiffTooLargeError produces a structured incomplete scan output."""
+        mock_client = Mock()
+        mock_client.get_pr_data.return_value = {
+            'number': 123,
+            'title': 'Large PR',
+            'body': 'Many changes',
+            'base': {'ref': 'main', 'sha': 'abc123'}
+        }
+        mock_client.get_pr_diff.side_effect = DiffTooLargeError(
+            "PR diff exceeds GitHub API limit (20,000 lines) and local git diff also failed: fatal: bad revision"
+        )
+        mock_client_class.return_value = mock_client
+
+        mock_runner = Mock()
+        mock_runner.validate_claude_available.return_value = (True, "")
+        mock_runner_class.return_value = mock_runner
+
+        mock_filter_class.return_value = Mock()
+
+        with patch.dict(os.environ, {
+            'GITHUB_REPOSITORY': 'owner/repo',
+            'PR_NUMBER': '123',
+            'GITHUB_TOKEN': 'test-token'
+        }):
+            with pytest.raises(SystemExit) as exc_info:
+                main()
+
+            assert exc_info.value.code == 1  # EXIT_GENERAL_ERROR
+
+            captured = capsys.readouterr()
+            output = json.loads(captured.out)
+            assert output['scan_status'] == 'incomplete'
+            assert output['pr_number'] == 123
+            assert output['repo'] == 'owner/repo'
+            assert output['findings'] == []
+            assert output['analysis_summary']['review_completed'] is False
+            assert output['analysis_summary']['skip_reason'] == 'diff_too_large'
+            assert 'Diff too large' in output['error']
     
     @patch('pathlib.Path.cwd')
     @patch('claudecode.github_action_audit.get_security_audit_prompt')

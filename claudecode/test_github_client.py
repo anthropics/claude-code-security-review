@@ -5,9 +5,10 @@ Unit tests for GitHubActionClient.
 
 import pytest
 import os
-from unittest.mock import Mock, patch
+import subprocess
+from unittest.mock import Mock, patch, MagicMock
 
-from claudecode.github_action_audit import GitHubActionClient
+from claudecode.github_action_audit import GitHubActionClient, DiffTooLargeError
 
 
 class TestGitHubActionClient:
@@ -337,3 +338,176 @@ class TestGitHubAPIIntegration:
         assert len(result['files']) == 100
         assert result['files'][0]['filename'] == 'file0.py'
         assert result['files'][99]['filename'] == 'file99.py'
+
+
+class TestDiffTooLarge:
+    """Test handling of large PR diffs that exceed GitHub's 20,000-line API limit."""
+
+    @patch('subprocess.run')
+    @patch('requests.get')
+    def test_get_pr_diff_406_falls_back_to_local_git_diff(self, mock_get, mock_subprocess):
+        """Test that a 406 response triggers local git diff fallback."""
+        # Mock GitHub API returning 406
+        mock_response = Mock()
+        mock_response.status_code = 406
+        mock_response.text = "Sorry, the diff exceeded the maximum number of lines (20000)"
+        mock_get.return_value = mock_response
+
+        # Mock successful local git diff
+        mock_subprocess.return_value = Mock(
+            returncode=0,
+            stdout="diff --git a/src/main.py b/src/main.py\n+import os\n",
+            stderr=""
+        )
+
+        with patch.dict(os.environ, {'GITHUB_TOKEN': 'test-token', 'REPO_PATH': '/tmp/repo'}):
+            client = GitHubActionClient()
+            result = client.get_pr_diff('owner/repo', 123, base_ref='main')
+
+        # Should have attempted local git diff
+        assert mock_subprocess.called
+        assert 'import os' in result
+
+    @patch('subprocess.run')
+    @patch('requests.get')
+    def test_get_pr_diff_406_tries_base_ref_first(self, mock_get, mock_subprocess):
+        """Test that fallback tries origin/base_ref...HEAD before HEAD~1."""
+        mock_response = Mock()
+        mock_response.status_code = 406
+        mock_get.return_value = mock_response
+
+        mock_subprocess.return_value = Mock(
+            returncode=0,
+            stdout="diff --git a/file.py b/file.py\n+new code\n",
+            stderr=""
+        )
+
+        with patch.dict(os.environ, {'GITHUB_TOKEN': 'test-token', 'REPO_PATH': '/tmp/repo'}):
+            client = GitHubActionClient()
+            client.get_pr_diff('owner/repo', 123, base_ref='main')
+
+        # First call should be git diff origin/main...HEAD
+        first_call_args = mock_subprocess.call_args_list[0]
+        assert first_call_args[0][0] == ['git', 'diff', 'origin/main...HEAD']
+
+    @patch('subprocess.run')
+    @patch('requests.get')
+    def test_get_pr_diff_406_falls_back_to_head_parent(self, mock_get, mock_subprocess):
+        """Test that if origin/base...HEAD fails, falls back to HEAD~1."""
+        mock_response = Mock()
+        mock_response.status_code = 406
+        mock_get.return_value = mock_response
+
+        # First call (origin/main...HEAD) fails, second (HEAD~1) succeeds
+        mock_subprocess.side_effect = [
+            Mock(returncode=128, stdout="", stderr="fatal: bad revision"),
+            Mock(returncode=0, stdout="diff --git a/file.py b/file.py\n+code\n", stderr="")
+        ]
+
+        with patch.dict(os.environ, {'GITHUB_TOKEN': 'test-token', 'REPO_PATH': '/tmp/repo'}):
+            client = GitHubActionClient()
+            result = client.get_pr_diff('owner/repo', 123, base_ref='main')
+
+        assert mock_subprocess.call_count == 2
+        second_call_args = mock_subprocess.call_args_list[1]
+        assert second_call_args[0][0] == ['git', 'diff', 'HEAD~1']
+        assert '+code' in result
+
+    @patch('subprocess.run')
+    @patch('requests.get')
+    def test_get_pr_diff_406_no_base_ref_uses_head_parent(self, mock_get, mock_subprocess):
+        """Test fallback without base_ref only tries HEAD~1."""
+        mock_response = Mock()
+        mock_response.status_code = 406
+        mock_get.return_value = mock_response
+
+        mock_subprocess.return_value = Mock(
+            returncode=0,
+            stdout="diff --git a/file.py b/file.py\n+code\n",
+            stderr=""
+        )
+
+        with patch.dict(os.environ, {'GITHUB_TOKEN': 'test-token', 'REPO_PATH': '/tmp/repo'}):
+            client = GitHubActionClient()
+            client.get_pr_diff('owner/repo', 123, base_ref=None)
+
+        # Should only try HEAD~1 (no base_ref provided)
+        assert mock_subprocess.call_count == 1
+        call_args = mock_subprocess.call_args_list[0]
+        assert call_args[0][0] == ['git', 'diff', 'HEAD~1']
+
+    @patch('subprocess.run')
+    @patch('requests.get')
+    def test_get_pr_diff_406_all_fallbacks_fail_raises_error(self, mock_get, mock_subprocess):
+        """Test that DiffTooLargeError is raised when all fallbacks fail."""
+        mock_response = Mock()
+        mock_response.status_code = 406
+        mock_get.return_value = mock_response
+
+        # Both local git diff attempts fail
+        mock_subprocess.return_value = Mock(
+            returncode=128,
+            stdout="",
+            stderr="fatal: bad revision 'origin/main...HEAD'"
+        )
+
+        with patch.dict(os.environ, {'GITHUB_TOKEN': 'test-token', 'REPO_PATH': '/tmp/repo'}):
+            client = GitHubActionClient()
+            with pytest.raises(DiffTooLargeError, match="PR diff exceeds GitHub API limit"):
+                client.get_pr_diff('owner/repo', 123, base_ref='main')
+
+    @patch('subprocess.run')
+    @patch('requests.get')
+    def test_get_pr_diff_406_git_diff_timeout_raises_error(self, mock_get, mock_subprocess):
+        """Test that git diff timeout is handled gracefully."""
+        mock_response = Mock()
+        mock_response.status_code = 406
+        mock_get.return_value = mock_response
+
+        mock_subprocess.side_effect = subprocess.TimeoutExpired(cmd='git diff', timeout=120)
+
+        with patch.dict(os.environ, {'GITHUB_TOKEN': 'test-token', 'REPO_PATH': '/tmp/repo'}):
+            client = GitHubActionClient()
+            with pytest.raises(DiffTooLargeError, match="timed out"):
+                client.get_pr_diff('owner/repo', 123, base_ref=None)
+
+    @patch('requests.get')
+    def test_get_pr_diff_non_406_error_still_raises(self, mock_get):
+        """Test that non-406 HTTP errors still raise normally."""
+        mock_response = Mock()
+        mock_response.status_code = 500
+        mock_response.raise_for_status.side_effect = Exception("Internal Server Error")
+        mock_get.return_value = mock_response
+
+        with patch.dict(os.environ, {'GITHUB_TOKEN': 'test-token'}):
+            client = GitHubActionClient()
+            with pytest.raises(Exception, match="Internal Server Error"):
+                client.get_pr_diff('owner/repo', 123)
+
+    @patch('subprocess.run')
+    @patch('requests.get')
+    def test_get_pr_diff_406_local_diff_filters_generated_files(self, mock_get, mock_subprocess):
+        """Test that local git diff output is filtered for generated files."""
+        mock_response = Mock()
+        mock_response.status_code = 406
+        mock_get.return_value = mock_response
+
+        diff_with_generated = """diff --git a/src/main.py b/src/main.py
++real code
+diff --git a/generated/api.py b/generated/api.py
+# @generated by protoc
++generated code
+"""
+        mock_subprocess.return_value = Mock(
+            returncode=0,
+            stdout=diff_with_generated,
+            stderr=""
+        )
+
+        with patch.dict(os.environ, {'GITHUB_TOKEN': 'test-token', 'REPO_PATH': '/tmp/repo'}):
+            client = GitHubActionClient()
+            result = client.get_pr_diff('owner/repo', 123, base_ref='main')
+
+        # Generated file should be filtered out
+        assert 'src/main.py' in result
+        assert 'generated/api.py' not in result
