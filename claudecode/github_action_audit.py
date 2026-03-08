@@ -16,6 +16,7 @@ import time
 
 # Import existing components we can reuse
 from claudecode.prompts import get_security_audit_prompt
+from claudecode.injection_scanner import scan_all, format_warnings
 from claudecode.findings_filter import FindingsFilter
 from claudecode.json_parser import parse_json_with_fallbacks
 from claudecode.constants import (
@@ -578,6 +579,15 @@ def main():
             print(json.dumps({'error': f'Failed to fetch PR data: {str(e)}'}))
             sys.exit(EXIT_GENERAL_ERROR)
                 
+        # Scan PR content for prompt injection attempts before building the prompt
+        injection_findings = scan_all(pr_data, pr_diff)
+        if injection_findings:
+            warnings = format_warnings(injection_findings)
+            print(f"[Warning] {warnings}", file=sys.stderr)
+            logger.warning(warnings)
+            # Add injection warnings as additional findings in the output
+            # but don't block the audit — the warnings are logged for visibility
+        
         # Generate security audit prompt
         prompt = get_security_audit_prompt(pr_data, pr_diff, custom_scan_instructions=custom_scan_instructions)
         
@@ -628,6 +638,19 @@ def main():
                 'excluded_findings_details': excluded_findings  # Include full details of what was filtered
             }
         }
+        
+        # Include prompt injection warnings if detected
+        if injection_findings:
+            output['injection_warnings'] = [
+                {
+                    'location': f.location,
+                    'pattern': f.pattern_name,
+                    'severity': f.severity,
+                    'description': f.description,
+                    'matched_text': f.matched_text,
+                }
+                for f in injection_findings
+            ]
         
         # Output JSON to stdout
         print(json.dumps(output, indent=2))
