@@ -72,6 +72,7 @@ SECURITY CATEGORIES TO EXAMINE:
 - Template injection in templating engines
 - NoSQL injection in database queries
 - Path traversal in file operations
+- SSRF via unvalidated/unsanitized user input that controls the host or protocol
 
 **Authentication & Authorization Issues:**
 - Authentication bypass logic
