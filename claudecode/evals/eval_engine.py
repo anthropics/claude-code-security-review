@@ -235,12 +235,19 @@ class EvaluationEngine:
                 clone_url = f"https://github.com/{repo_name}.git"
                 if self.github_token:
                     clone_url = f"https://{self.github_token}@github.com/{repo_name}.git"
-                
+
                 try:
                     subprocess.run(['git', 'clone', '--filter=blob:none', clone_url, base_repo_path],
                                  check=True, capture_output=True, timeout=TIMEOUT_CLONE)
                 except subprocess.CalledProcessError as e:
-                    error_msg = f"Failed to clone repository: {e.stderr.decode()}"
+                    stderr = e.stderr.decode(errors='replace') if e.stderr else ""
+                    # Redact the GitHub token from git's error output.
+                    # Git may echo the clone URL (which embeds the token)
+                    # in stderr when the clone fails, leaking the credential
+                    # into logs and the JSON result file on disk.
+                    if self.github_token:
+                        stderr = stderr.replace(self.github_token, "[REDACTED]")
+                    error_msg = f"Failed to clone repository: {stderr}"
                     self.log(error_msg)
                     return False, "", error_msg
             
