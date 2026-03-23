@@ -240,7 +240,7 @@ class EvaluationEngine:
                     subprocess.run(['git', 'clone', '--filter=blob:none', clone_url, base_repo_path],
                                  check=True, capture_output=True, timeout=TIMEOUT_CLONE)
                 except subprocess.CalledProcessError as e:
-                    stderr = e.stderr.decode() if e.stderr else ""
+                    stderr = e.stderr.decode(errors='replace') if e.stderr else ""
                     # Redact the GitHub token from git's error output.
                     # Git may echo the clone URL (which embeds the token)
                     # in stderr when the clone fails, leaking the credential
