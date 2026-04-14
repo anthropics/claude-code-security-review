@@ -323,3 +323,52 @@ diff --git a/émojis.py b/émojis.py
         assert "émoji-user" in prompt
         assert "émojis.py" in prompt
         assert "🚨" in prompt  # From diff
+    def test_get_security_audit_prompt_contains_supply_chain_category(self):
+        """Test that the prompt includes the Dependency & Supply Chain Security category."""
+        pr_data = {
+            "number": 1,
+            "title": "Update dependencies",
+            "body": "Bumping versions",
+            "user": "bot",
+            "changed_files": 1,
+            "additions": 1,
+            "deletions": 1,
+            "head": {"repo": {"full_name": "owner/repo"}},
+            "files": [{"filename": "package.json", "status": "modified",
+                        "additions": 1, "deletions": 1}]
+        }
+
+        prompt = get_security_audit_prompt(pr_data)
+
+        assert "Dependency & Supply Chain Security" in prompt
+        assert "typosquatting" in prompt.lower()
+        assert "dependency confusion" in prompt.lower()
+        assert "lock file" in prompt.lower()
+        assert "post-install scripts" in prompt.lower()
+
+    def test_get_security_audit_prompt_supply_chain_with_custom_instructions(self):
+        """Test that custom_scan_instructions still injects after the supply chain category."""
+        pr_data = {
+            "number": 2,
+            "title": "Test",
+            "body": "",
+            "user": "tester",
+            "changed_files": 1,
+            "additions": 1,
+            "deletions": 1,
+            "head": {"repo": {"full_name": "owner/repo"}},
+            "files": [{"filename": "setup.py", "status": "modified",
+                        "additions": 1, "deletions": 1}]
+        }
+
+        custom = "Also check for GPL license violations."
+        prompt = get_security_audit_prompt(pr_data, custom_scan_instructions=custom)
+
+        supply_chain_pos = prompt.find("Dependency & Supply Chain Security")
+        custom_pos = prompt.find(custom)
+
+        assert supply_chain_pos != -1, "Supply chain section missing"
+        assert custom_pos != -1, "Custom instructions missing"
+        assert supply_chain_pos < custom_pos, (
+            "Custom instructions appeared before the supply chain section"
+        )
