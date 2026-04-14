@@ -5,6 +5,7 @@ import os
 from unittest.mock import patch, MagicMock
 
 
+from claudecode.constants import DEFAULT_CLAUDE_MODEL
 from claudecode.github_action_audit import (
     get_environment_config,
     initialize_clients,
@@ -115,6 +116,7 @@ class TestHelperFunctions:
                 use_hard_exclusions=True,
                 use_claude_filtering=True,
                 api_key='test-key-123',
+                model=DEFAULT_CLAUDE_MODEL,
                 custom_filtering_instructions=None
             )
     
