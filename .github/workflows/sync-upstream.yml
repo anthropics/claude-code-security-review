@@ -1,0 +1,120 @@
+# Weekly upstream-sync workflow for the Project-Ame fork.
+#
+# Scope: detect new commits on anthropics/claude-code-security-review@main
+# and open a PR against this fork's main so a human can review before
+# the SHA advances. Supply-chain-critical — DO NOT add auto-merge.
+#
+# Paired with ame-abm BACKLOG D158(b). Resolves the upstream-tracking
+# gap that Dependabot cannot handle (Dependabot monitors referenced
+# action SHAs in workflow files, not arbitrary fork upstream remotes).
+#
+# Chose first-party scheduled workflow over third-party tools (e.g.
+# wei/pull): keeps supply-chain surface inside Project-Ame org, no
+# third-party-tool approval needed, auditable as first-party CI.
+
+name: Sync from upstream (anthropics/claude-code-security-review)
+
+on:
+  schedule:
+    - cron: '0 6 * * 1'   # Monday 06:00 UTC — same day as ame-abm dependabot
+  # workflow_dispatch: restricted to repo write-access (fork maintainers only)
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write           # surface sync failures as tracking issues
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      # actions/checkout v5.0.1 (pinned — dog-foods ame-abm D157)
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure git identity
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Fetch upstream
+        run: |
+          git remote add upstream https://github.com/anthropics/claude-code-security-review.git
+          git fetch upstream main
+
+      - name: Open PR if upstream diverged
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          if git merge-base --is-ancestor upstream/main HEAD; then
+            echo "No new upstream commits — exit clean."
+            exit 0
+          fi
+          SHORT=$(git rev-parse --short upstream/main)
+          BRANCH="sync/upstream-${SHORT}"
+          # Idempotency: skip if a sync branch for this upstream tip already exists
+          if git ls-remote --exit-code origin "refs/heads/${BRANCH}" >/dev/null 2>&1; then
+            echo "Sync branch ${BRANCH} already exists on origin — skipping."
+            exit 0
+          fi
+          # Capture the upstream commit range BEFORE merging so the PR body
+          # shows the actual new commits, not just the merge commit.
+          MERGE_BASE=$(git merge-base HEAD upstream/main)
+          # Write to file to avoid bash double-quote expansion on commit
+          # messages containing $ or backticks (unhygienic — upstream is
+          # trusted but defensive).
+          git log --oneline "${MERGE_BASE}..upstream/main" > /tmp/upstream-commits.txt
+          git checkout -b "$BRANCH"
+          # merge (not --ff-only): upstream may have diverged from our fork tip.
+          # On conflict: abort, open a tracking issue, fail loudly so next
+          # Monday's silent retry doesn't paper over the stall.
+          if ! git merge --no-edit upstream/main; then
+            git merge --abort
+            gh issue create \
+              --title "sync-upstream: merge conflict at ${SHORT}" \
+              --body-file - <<EOF
+          Weekly upstream-sync hit a merge conflict against upstream/main @ ${SHORT}.
+
+          Manual resolution needed:
+          1. \`git clone https://github.com/Project-Ame/claude-code-security-review.git\`
+          2. \`git remote add upstream https://github.com/anthropics/claude-code-security-review.git\`
+          3. \`git fetch upstream main\`
+          4. \`git checkout -b sync/upstream-${SHORT}-manual\`
+          5. \`git merge upstream/main\`
+          6. Resolve conflicts, push branch, open PR against main.
+
+          This issue will auto-close once the corresponding sync PR merges.
+          EOF
+            exit 1
+          fi
+          git push origin "$BRANCH"
+          # Build PR body from a file to keep bash double-quote interpretation
+          # away from upstream commit messages.
+          {
+            echo "Automated upstream sync. **Review before merging — supply-chain-critical.**"
+            echo ""
+            echo "New commits from upstream:"
+            echo ""
+            echo '```'
+            cat /tmp/upstream-commits.txt
+            echo '```'
+            echo ""
+            echo "## Reviewer checklist"
+            echo ""
+            echo "Before approving:"
+            echo "- [ ] Diff each upstream commit for new network calls, subprocess invocations, or file writes"
+            echo "- [ ] Check for new third-party dependencies (package.json / requirements.txt / action refs)"
+            echo "- [ ] Verify prompt-template changes don't loosen the security-scan scope"
+            echo "- [ ] Confirm upstream CI is green on the tip commit"
+            echo "- [ ] If upstream has a signed tag covering these commits, verify the signature"
+            echo ""
+            echo "Once merged, update ame-abm's \`.github/workflows/claude-security-review.yml\` pin to the new fork-main SHA in a follow-up PR."
+          } > /tmp/pr-body.md
+          gh pr create \
+            --base main --head "$BRANCH" \
+            --title "sync: upstream anthropics/claude-code-security-review @ ${SHORT}" \
+            --body-file /tmp/pr-body.md
