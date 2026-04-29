@@ -323,10 +323,15 @@ class SimpleClaudeRunner:
             )
             
             if result.returncode == 0:
-                # Also check if API key is configured
-                api_key = os.environ.get('ANTHROPIC_API_KEY', '')
-                if not api_key:
-                    return False, "ANTHROPIC_API_KEY environment variable is not set"
+                # Also check that auth is configured — either an Anthropic API key
+                # for direct API access, or Vertex AI credentials.
+                use_vertex = os.environ.get('CLAUDE_CODE_USE_VERTEX', '').lower() in ('1', 'true')
+                if use_vertex:
+                    if not os.environ.get('ANTHROPIC_VERTEX_PROJECT_ID'):
+                        return False, "CLAUDE_CODE_USE_VERTEX is set but ANTHROPIC_VERTEX_PROJECT_ID is not"
+                else:
+                    if not os.environ.get('ANTHROPIC_API_KEY', ''):
+                        return False, "ANTHROPIC_API_KEY environment variable is not set"
                 return True, ""
             else:
                 error_msg = f"Claude Code returned exit code {result.returncode}"
@@ -410,14 +415,23 @@ def initialize_findings_filter(custom_filtering_instructions: Optional[str] = No
         # Check if we should use Claude API filtering
         use_claude_filtering = os.environ.get('ENABLE_CLAUDE_FILTERING', 'false').lower() == 'true'
         api_key = os.environ.get('ANTHROPIC_API_KEY')
-        
-        if use_claude_filtering and api_key:
+        use_vertex = os.environ.get('CLAUDE_CODE_USE_VERTEX', '').lower() in ('1', 'true')
+        vertex_project_id = os.environ.get('ANTHROPIC_VERTEX_PROJECT_ID')
+        vertex_region = os.environ.get('CLOUD_ML_REGION')
+
+        # Filtering needs either an API key OR Vertex credentials
+        has_auth = bool(api_key) or (use_vertex and vertex_project_id)
+
+        if use_claude_filtering and has_auth:
             # Use full filtering with Claude API
             return FindingsFilter(
                 use_hard_exclusions=True,
                 use_claude_filtering=True,
                 api_key=api_key,
-                custom_filtering_instructions=custom_filtering_instructions
+                custom_filtering_instructions=custom_filtering_instructions,
+                use_vertex=use_vertex,
+                vertex_region=vertex_region,
+                vertex_project_id=vertex_project_id,
             )
         else:
             # Fallback to filtering with hard rules only

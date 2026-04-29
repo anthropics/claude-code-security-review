@@ -157,32 +157,41 @@ class HardExclusionRules:
 class FindingsFilter:
     """Main filter class for security findings."""
     
-    def __init__(self, 
+    def __init__(self,
                  use_hard_exclusions: bool = True,
                  use_claude_filtering: bool = True,
                  api_key: Optional[str] = None,
                  model: str = DEFAULT_CLAUDE_MODEL,
-                 custom_filtering_instructions: Optional[str] = None):
+                 custom_filtering_instructions: Optional[str] = None,
+                 use_vertex: bool = False,
+                 vertex_region: Optional[str] = None,
+                 vertex_project_id: Optional[str] = None):
         """Initialize findings filter.
-        
+
         Args:
             use_hard_exclusions: Whether to apply hard exclusion rules
             use_claude_filtering: Whether to use Claude API for filtering
-            api_key: Anthropic API key for Claude filtering
+            api_key: Anthropic API key for Claude filtering (ignored when use_vertex)
             model: Claude model to use for filtering
             custom_filtering_instructions: Optional custom filtering instructions
+            use_vertex: Route Claude filtering calls through Vertex AI
+            vertex_region: GCP region for Vertex AI
+            vertex_project_id: GCP project hosting Vertex AI
         """
         self.use_hard_exclusions = use_hard_exclusions
         self.use_claude_filtering = use_claude_filtering
         self.custom_filtering_instructions = custom_filtering_instructions
-        
+
         # Initialize Claude client if filtering is enabled
         self.claude_client = None
         if self.use_claude_filtering:
             try:
                 self.claude_client = ClaudeAPIClient(
                     model=model,
-                    api_key=api_key
+                    api_key=api_key,
+                    use_vertex=use_vertex,
+                    vertex_region=vertex_region,
+                    vertex_project_id=vertex_project_id,
                 )
                 # Validate API access
                 valid, error = self.claude_client.validate_api_access()
