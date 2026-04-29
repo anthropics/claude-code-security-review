@@ -6,7 +6,7 @@ import time
 from typing import Dict, Any, Tuple, Optional
 from pathlib import Path
 
-from anthropic import Anthropic
+from anthropic import Anthropic, AnthropicVertex
 
 from claudecode.constants import (
     DEFAULT_CLAUDE_MODEL, DEFAULT_TIMEOUT_SECONDS, DEFAULT_MAX_RETRIES,
@@ -20,42 +20,76 @@ logger = get_logger(__name__)
 
 class ClaudeAPIClient:
     """Client for calling Claude API directly for security analysis tasks."""
-    
-    def __init__(self, 
+
+    def __init__(self,
                  model: Optional[str] = None,
                  api_key: Optional[str] = None,
                  timeout_seconds: Optional[int] = None,
-                 max_retries: Optional[int] = None):
+                 max_retries: Optional[int] = None,
+                 use_vertex: bool = False,
+                 vertex_region: Optional[str] = None,
+                 vertex_project_id: Optional[str] = None):
         """Initialize Claude API client.
-        
+
         Args:
             model: Claude model to use
-            api_key: Anthropic API key (if None, reads from ANTHROPIC_API_KEY env var)
+            api_key: Anthropic API key (only used when use_vertex is False;
+                if None, reads from ANTHROPIC_API_KEY env var)
             timeout_seconds: Request timeout in seconds
             max_retries: Maximum retry attempts for API calls
+            use_vertex: When True, route requests through Vertex AI instead
+                of api.anthropic.com. Auth is taken from Application Default
+                Credentials, so callers must set up GOOGLE_APPLICATION_CREDENTIALS
+                (e.g. via google-github-actions/auth) before instantiating.
+            vertex_region: GCP region for Vertex AI (e.g. "global", "us-east5").
+                Defaults to CLOUD_ML_REGION env var or "global".
+            vertex_project_id: GCP project ID hosting Vertex AI. Defaults to
+                ANTHROPIC_VERTEX_PROJECT_ID env var.
         """
         self.model = model or DEFAULT_CLAUDE_MODEL
         self.timeout_seconds = timeout_seconds or DEFAULT_TIMEOUT_SECONDS
         self.max_retries = max_retries or DEFAULT_MAX_RETRIES
-        
-        # Get API key from environment or parameter
-        self.api_key = api_key or os.environ.get("ANTHROPIC_API_KEY")
-        if not self.api_key:
-            raise ValueError(
-                "No Anthropic API key found. Please set ANTHROPIC_API_KEY environment variable "
-                "or provide api_key parameter."
+        self.use_vertex = use_vertex
+
+        if use_vertex:
+            self.api_key = None
+            region = vertex_region or os.environ.get("CLOUD_ML_REGION") or "global"
+            project_id = vertex_project_id or os.environ.get("ANTHROPIC_VERTEX_PROJECT_ID")
+            if not project_id:
+                raise ValueError(
+                    "Vertex AI mode requires a project ID. Provide vertex_project_id "
+                    "or set ANTHROPIC_VERTEX_PROJECT_ID environment variable."
+                )
+            self.client = AnthropicVertex(region=region, project_id=project_id)
+            logger.info(
+                f"Claude API client initialized via Vertex AI "
+                f"(region={region}, project={project_id})"
             )
-        
-        # Initialize Anthropic client
-        self.client = Anthropic(api_key=self.api_key)
-        logger.info("Claude API client initialized successfully")
+        else:
+            self.api_key = api_key or os.environ.get("ANTHROPIC_API_KEY")
+            if not self.api_key:
+                raise ValueError(
+                    "No Anthropic API key found. Please set ANTHROPIC_API_KEY environment variable "
+                    "or provide api_key parameter."
+                )
+            self.client = Anthropic(api_key=self.api_key)
+            logger.info("Claude API client initialized successfully")
     
     def validate_api_access(self) -> Tuple[bool, str]:
         """Validate that API access is working.
-        
+
         Returns:
             Tuple of (success, error_message)
         """
+        # Vertex mode: skip the proactive validation call. The AnthropicVertex
+        # client uses Application Default Credentials and we can't cheaply
+        # probe a model that's guaranteed to be enabled in the caller's
+        # project — any real auth/quota issue will surface on the first
+        # actual filter call, which already has retry and error handling.
+        if self.use_vertex:
+            logger.info("Claude API access validation skipped (Vertex mode)")
+            return True, ""
+
         try:
             # Simple test call to verify API access
             self.client.messages.create(
@@ -356,21 +390,30 @@ Respond with EXACTLY this JSON structure (no markdown, no code blocks):
 
 def get_claude_api_client(model: str = DEFAULT_CLAUDE_MODEL,
                          api_key: Optional[str] = None,
-                         timeout_seconds: int = DEFAULT_TIMEOUT_SECONDS) -> ClaudeAPIClient:
+                         timeout_seconds: int = DEFAULT_TIMEOUT_SECONDS,
+                         use_vertex: bool = False,
+                         vertex_region: Optional[str] = None,
+                         vertex_project_id: Optional[str] = None) -> ClaudeAPIClient:
     """Convenience function to get Claude API client.
-    
+
     Args:
         model: Claude model identifier
         api_key: Optional API key (reads from environment if not provided)
         timeout_seconds: API call timeout
-        
+        use_vertex: Route through Vertex AI instead of api.anthropic.com
+        vertex_region: GCP region for Vertex AI
+        vertex_project_id: GCP project hosting Vertex AI
+
     Returns:
         Initialized ClaudeAPIClient instance
     """
     return ClaudeAPIClient(
         model=model,
         api_key=api_key,
-        timeout_seconds=timeout_seconds
+        timeout_seconds=timeout_seconds,
+        use_vertex=use_vertex,
+        vertex_region=vertex_region,
+        vertex_project_id=vertex_project_id,
     )
 
 

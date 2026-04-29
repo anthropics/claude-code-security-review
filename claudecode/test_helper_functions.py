@@ -109,15 +109,61 @@ class TestHelperFunctions:
             'ANTHROPIC_API_KEY': 'test-key-123'
         }):
             result = initialize_findings_filter()
-            
+
             assert result == mock_filter_instance
             mock_filter.assert_called_once_with(
                 use_hard_exclusions=True,
                 use_claude_filtering=True,
                 api_key='test-key-123',
-                custom_filtering_instructions=None
+                custom_filtering_instructions=None,
+                use_vertex=False,
+                vertex_region=None,
+                vertex_project_id=None,
             )
     
+    @patch('claudecode.github_action_audit.FindingsFilter')
+    def test_initialize_findings_filter_with_vertex(self, mock_filter):
+        """Test initializing findings filter with Vertex AI enabled."""
+        mock_filter_instance = MagicMock()
+        mock_filter.return_value = mock_filter_instance
+
+        with patch.dict(os.environ, {
+            'ENABLE_CLAUDE_FILTERING': 'true',
+            'CLAUDE_CODE_USE_VERTEX': '1',
+            'ANTHROPIC_VERTEX_PROJECT_ID': 'my-gcp-project',
+            'CLOUD_ML_REGION': 'us-east5',
+        }, clear=True):
+            result = initialize_findings_filter()
+
+            assert result == mock_filter_instance
+            mock_filter.assert_called_once_with(
+                use_hard_exclusions=True,
+                use_claude_filtering=True,
+                api_key=None,
+                custom_filtering_instructions=None,
+                use_vertex=True,
+                vertex_region='us-east5',
+                vertex_project_id='my-gcp-project',
+            )
+
+    @patch('claudecode.github_action_audit.FindingsFilter')
+    def test_initialize_findings_filter_vertex_without_project_falls_back(self, mock_filter):
+        """Vertex flag set but no project ID → fall back to hard exclusions."""
+        mock_filter_instance = MagicMock()
+        mock_filter.return_value = mock_filter_instance
+
+        with patch.dict(os.environ, {
+            'ENABLE_CLAUDE_FILTERING': 'true',
+            'CLAUDE_CODE_USE_VERTEX': '1',
+            # Missing ANTHROPIC_VERTEX_PROJECT_ID
+        }, clear=True):
+            result = initialize_findings_filter()
+
+            assert result == mock_filter_instance
+            # Should call FindingsFilter with use_claude_filtering=False
+            call_kwargs = mock_filter.call_args.kwargs
+            assert call_kwargs.get('use_claude_filtering') is False
+
     @patch('claudecode.github_action_audit.FindingsFilter')
     def test_initialize_findings_filter_without_claude(self, mock_simple_filter):
         """Test initializing findings filter without Claude API."""
