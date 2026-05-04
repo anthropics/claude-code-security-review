@@ -4,6 +4,7 @@ import os
 import sys
 import subprocess
 import shutil
+import tempfile
 import time
 import threading
 from typing import Dict, Any, Optional, Tuple, List
@@ -197,10 +198,10 @@ class EvaluationEngine:
     
     def _get_eval_branch_name(self, test_case: EvalCase) -> str:
         """Generate a branch name for evaluation.
-        
+
         Args:
             test_case: Test case being evaluated
-            
+
         Returns:
             Branch name for the evaluation
         """
@@ -208,6 +209,28 @@ class EvaluationEngine:
         safe_repo = test_case.repo_name.replace('/', '-').replace('.', '-')
         timestamp = time.strftime('%Y%m%d-%H%M%S')
         return f"eval-pr-{safe_repo}-{test_case.pr_number}-{timestamp}"
+
+    def _make_askpass_helper(self) -> str:
+        """Write a temp shell script that prints $GIT_AUTH_TOKEN.
+
+        Used by ``git clone`` via the ``GIT_ASKPASS`` environment variable
+        so the GitHub token never has to live in argv (where other local
+        users could see it via ``ps``) or in the cloned repo's
+        ``.git/config``. The helper file is created with mode 0o700 and
+        is unlinked by the caller in a ``finally`` block.
+        """
+        fd, path = tempfile.mkstemp(prefix='gitaskpass-', suffix='.sh')
+        try:
+            with os.fdopen(fd, 'w') as f:
+                f.write('#!/bin/sh\nprintf %s "$GIT_AUTH_TOKEN"\n')
+            os.chmod(path, 0o700)
+            return path
+        except Exception:
+            try:
+                os.unlink(path)
+            except OSError:
+                pass
+            raise
     
     def _setup_repository(self, test_case: EvalCase) -> Tuple[bool, str, str]:
         """Set up repository worktree for PR evaluation.
@@ -233,16 +256,37 @@ class EvaluationEngine:
             if not os.path.exists(base_repo_path):
                 self.log(f"Cloning {repo_name} to {base_repo_path}")
                 clone_url = f"https://github.com/{repo_name}.git"
+                clone_env = os.environ.copy()
+                askpass_helper: Optional[str] = None
                 if self.github_token:
-                    clone_url = f"https://{self.github_token}@github.com/{repo_name}.git"
-                
+                    # Pass the token via GIT_ASKPASS so it never appears in
+                    # argv (visible to other local users via `ps`) or in
+                    # the cloned repo's .git/config. The askpass helper is
+                    # a tiny shell script that prints $GIT_AUTH_TOKEN; the
+                    # token only lives in this process's environment and
+                    # in a mode-0700 helper file we delete in `finally`.
+                    askpass_helper = self._make_askpass_helper()
+                    clone_env['GIT_ASKPASS'] = askpass_helper
+                    clone_env['GIT_AUTH_TOKEN'] = self.github_token
+                    clone_env['GIT_TERMINAL_PROMPT'] = '0'
+                    # Username is required so git skips the "Username for"
+                    # prompt; the password is supplied by the askpass helper.
+                    clone_url = f"https://x-access-token@github.com/{repo_name}.git"
+
                 try:
                     subprocess.run(['git', 'clone', '--filter=blob:none', clone_url, base_repo_path],
+                                 env=clone_env,
                                  check=True, capture_output=True, timeout=TIMEOUT_CLONE)
                 except subprocess.CalledProcessError as e:
                     error_msg = f"Failed to clone repository: {e.stderr.decode()}"
                     self.log(error_msg)
                     return False, "", error_msg
+                finally:
+                    if askpass_helper is not None:
+                        try:
+                            os.unlink(askpass_helper)
+                        except OSError:
+                            pass
             
             # Clean up any stale worktrees for this evaluation
             eval_branch_prefix = f"eval-pr-{safe_repo_name}-{pr_number}"
