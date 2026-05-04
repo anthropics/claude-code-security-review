@@ -182,6 +182,56 @@ class TestEvaluationEngine:
     
     @patch('subprocess.run')
     @patch('os.path.exists')
+    def test_setup_repository_clone_does_not_leak_token_in_argv(self, mock_exists, mock_run):
+        """Regression test: when ``github_token`` is set, the token must
+        NOT appear in the argv of any ``subprocess.run`` call. argv is
+        visible to every other user on the host via ``ps``, so embedding
+        the token there is a credential exposure. The fix uses
+        ``GIT_ASKPASS`` + an env var so the token only lives in this
+        process's environment and a mode-0700 helper file."""
+        mock_exists.return_value = False  # Repository doesn't exist
+        secret_token = 'ghp_secret_token_must_not_appear_in_argv_AAAAAAAAAAAAAAAAAAAA'
+        mock_run.side_effect = [
+            Mock(returncode=0, stdout=secret_token + '\n'),  # gh auth token
+            Mock(returncode=0),  # git clone
+            Mock(returncode=0),  # git fetch
+            Mock(returncode=0),  # git worktree add
+        ]
+        with patch.dict(os.environ, {'ANTHROPIC_API_KEY': 'test-key'}, clear=False):
+            os.environ.pop('GITHUB_TOKEN', None)
+            engine = EvaluationEngine()
+            assert engine.github_token == secret_token
+
+            case = EvalCase("owner/repo", 123)
+            success, _, _ = engine._setup_repository(case)
+            assert success is True
+
+        # Walk every recorded subprocess.run call and confirm the token
+        # never appears in any positional or keyword argv.
+        for call in mock_run.call_args_list:
+            argv = call.args[0] if call.args else call.kwargs.get('args', [])
+            for arg in argv:
+                assert secret_token not in str(arg), (
+                    f"github token leaked into subprocess argv: {arg!r}"
+                )
+
+        # The clone URL should use the ``x-access-token`` placeholder
+        # username rather than embedding the token. argv[1] is the git
+        # subcommand; the URL is the second-to-last positional arg.
+        clone_call = mock_run.call_args_list[1]
+        clone_argv = clone_call.args[0]
+        assert any('x-access-token@github.com' in str(a) for a in clone_argv), (
+            f"expected x-access-token placeholder in clone argv, got {clone_argv!r}"
+        )
+        # GIT_ASKPASS must be set in the env passed to the clone subprocess.
+        clone_env = clone_call.kwargs.get('env') or {}
+        assert clone_env.get('GIT_ASKPASS'), (
+            "GIT_ASKPASS must be set on the clone subprocess env"
+        )
+        assert clone_env.get('GIT_AUTH_TOKEN') == secret_token
+
+    @patch('subprocess.run')
+    @patch('os.path.exists')
     def test_setup_repository_existing(self, mock_exists, mock_run):
         """Test repository setup with existing repository."""
         with patch.dict(os.environ, {'ANTHROPIC_API_KEY': 'test-key'}):
