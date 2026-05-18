@@ -48,6 +48,11 @@ inputs:
     required: false
     default: ''
 
+  full-codebase-scan:
+    description: 'Audit the entire repository at the current checkout instead of only the PR diff'
+    required: false
+    default: 'false'
+
 outputs:
   findings-count:
     description: 'Number of security findings'
@@ -186,6 +191,7 @@ runs:
         EXCLUDE_DIRECTORIES: ${{ inputs.exclude-directories }}
         FALSE_POSITIVE_FILTERING_INSTRUCTIONS: ${{ inputs.false-positive-filtering-instructions }}
         CUSTOM_SECURITY_SCAN_INSTRUCTIONS: ${{ inputs.custom-security-scan-instructions }}
+        FULL_CODEBASE_SCAN: ${{ inputs.full-codebase-scan }}
         CLAUDE_MODEL: ${{ inputs.claude-model }}
         CLAUDECODE_TIMEOUT: ${{ inputs.claudecode-timeout }}
         ACTION_PATH: ${{ github.action_path }}

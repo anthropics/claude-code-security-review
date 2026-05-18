@@ -15,7 +15,7 @@ import re
 import time 
 
 # Import existing components we can reuse
-from claudecode.prompts import get_security_audit_prompt
+from claudecode.prompts import get_security_audit_prompt, get_full_codebase_audit_prompt
 from claudecode.findings_filter import FindingsFilter
 from claudecode.json_parser import parse_json_with_fallbacks
 from claudecode.constants import (
@@ -570,25 +570,31 @@ def main():
             print(json.dumps({'error': f'Claude Code not available: {claude_error}'}))
             sys.exit(EXIT_GENERAL_ERROR)
         
-        # Get PR data
+        full_codebase_scan = os.environ.get('FULL_CODEBASE_SCAN', '').lower() == 'true'
+
+        # Get PR data (still useful for context even in full-codebase mode)
         try:
             pr_data = github_client.get_pr_data(repo_name, pr_number)
-            pr_diff = github_client.get_pr_diff(repo_name, pr_number)
+            pr_diff = None if full_codebase_scan else github_client.get_pr_diff(repo_name, pr_number)
         except Exception as e:
             print(json.dumps({'error': f'Failed to fetch PR data: {str(e)}'}))
             sys.exit(EXIT_GENERAL_ERROR)
-                
+
         # Generate security audit prompt
-        prompt = get_security_audit_prompt(pr_data, pr_diff, custom_scan_instructions=custom_scan_instructions)
-        
+        if full_codebase_scan:
+            print("[Info] FULL_CODEBASE_SCAN enabled — auditing entire repository, ignoring PR diff", file=sys.stderr)
+            prompt = get_full_codebase_audit_prompt(pr_data, custom_scan_instructions=custom_scan_instructions)
+        else:
+            prompt = get_security_audit_prompt(pr_data, pr_diff, custom_scan_instructions=custom_scan_instructions)
+
         # Run Claude Code security audit
         # Get repo directory from environment or use current directory
         repo_path = os.environ.get('REPO_PATH')
         repo_dir = Path(repo_path) if repo_path else Path.cwd()
         success, error_msg, results = claude_runner.run_security_audit(repo_dir, prompt)
-        
-        # If prompt is too long, retry without diff
-        if not success and error_msg == "PROMPT_TOO_LONG":
+
+        # If prompt is too long, retry without diff (only meaningful in diff mode)
+        if not success and error_msg == "PROMPT_TOO_LONG" and not full_codebase_scan:
             print(f"[Info] Prompt too long, retrying without diff. Original prompt length: {len(prompt)} characters", file=sys.stderr)
             prompt_without_diff = get_security_audit_prompt(pr_data, pr_diff, include_diff=False, custom_scan_instructions=custom_scan_instructions)
             print(f"[Info] New prompt length: {len(prompt_without_diff)} characters", file=sys.stderr)

@@ -22,7 +22,7 @@ class TestSimpleClaudeRunner:
         assert runner.timeout_seconds == 1800
         
         runner2 = SimpleClaudeRunner()  # Default
-        assert runner2.timeout_seconds == 1200  # 20 minutes default
+        assert runner2.timeout_seconds == 600  # 10 minutes default
     
     @patch('subprocess.run')
     def test_validate_claude_available_success(self, mock_run):
@@ -256,17 +256,17 @@ class TestSimpleClaudeRunner:
     @patch('subprocess.run')
     def test_run_security_audit_timeout(self, mock_run):
         """Test timeout handling."""
-        mock_run.side_effect = subprocess.TimeoutExpired(['claude'], 1200)
-        
+        mock_run.side_effect = subprocess.TimeoutExpired(['claude'], 600)
+
         runner = SimpleClaudeRunner()
         with patch('pathlib.Path.exists', return_value=True):
             success, error, results = runner.run_security_audit(
                 Path('/tmp/test'),
                 "test prompt"
             )
-        
+
         assert success is False
-        assert 'timed out after 20 minutes' in error
+        assert 'timed out after 10 minutes' in error
         assert results == {}
     
     @patch('subprocess.run')

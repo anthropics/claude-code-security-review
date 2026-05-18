@@ -3,10 +3,14 @@
 import os
 import json
 import time
-from typing import Dict, Any, Tuple, Optional
+from typing import Dict, Any, Tuple, Optional, Union, List
 from pathlib import Path
 
 from anthropic import Anthropic
+
+# Type alias: either a plain string (legacy) or a list of content blocks
+# (advanced — supports cache_control for prompt caching).
+PromptInput = Union[str, List[Dict[str, Any]]]
 
 from claudecode.constants import (
     DEFAULT_CLAUDE_MODEL, DEFAULT_TIMEOUT_SECONDS, DEFAULT_MAX_RETRIES,
@@ -59,7 +63,7 @@ class ClaudeAPIClient:
         try:
             # Simple test call to verify API access
             self.client.messages.create(
-                model="claude-3-5-haiku-20241022",
+                model=self.model,
                 max_tokens=10,
                 messages=[{"role": "user", "content": "Hello"}],
                 timeout=10
@@ -71,30 +75,32 @@ class ClaudeAPIClient:
             logger.error(f"Claude API validation failed: {error_msg}")
             return False, f"API validation failed: {error_msg}"
     
-    def call_with_retry(self, 
-                       prompt: str,
-                       system_prompt: Optional[str] = None,
+    def call_with_retry(self,
+                       prompt: PromptInput,
+                       system_prompt: Optional[PromptInput] = None,
                        max_tokens: int = PROMPT_TOKEN_LIMIT) -> Tuple[bool, str, str]:
         """Make Claude API call with retry logic.
-        
+
         Args:
-            prompt: User prompt
-            system_prompt: Optional system prompt
+            prompt: User prompt — string OR a list of content blocks. Pass a
+                list of blocks (with optional ``cache_control`` markers) to
+                enable Anthropic prompt caching on the stable prefix.
+            system_prompt: Optional system prompt — same shape as ``prompt``.
             max_tokens: Maximum tokens to generate
-            
+
         Returns:
             Tuple of (success, response_text, error_message)
         """
         retries = 0
         last_error = None
-        
+
         while retries <= self.max_retries:
             try:
                 logger.info(f"Claude API call attempt {retries + 1}/{self.max_retries + 1}")
-                
-                # Prepare messages
+
+                # Prepare messages — content may be str or list-of-blocks
                 messages = [{"role": "user", "content": prompt}]
-                
+
                 # Build API call parameters
                 api_params = {
                     "model": self.model,
@@ -102,22 +108,35 @@ class ClaudeAPIClient:
                     "messages": messages,
                     "timeout": self.timeout_seconds
                 }
-                
+
                 if system_prompt:
                     api_params["system"] = system_prompt
-                
+
                 # Make API call
                 start_time = time.time()
                 response = self.client.messages.create(**api_params)
                 duration = time.time() - start_time
-                
+
                 # Extract text from response
                 response_text = ""
                 for content_block in response.content:
                     if hasattr(content_block, 'text'):
                         response_text += content_block.text
-                
-                logger.info(f"Claude API call successful in {duration:.1f}s")
+
+                # Log cache usage when present — confirms caching is wired up.
+                usage = getattr(response, 'usage', None)
+                if usage is not None:
+                    cache_read = getattr(usage, 'cache_read_input_tokens', 0) or 0
+                    cache_write = getattr(usage, 'cache_creation_input_tokens', 0) or 0
+                    if cache_read or cache_write:
+                        logger.info(
+                            f"Claude API call successful in {duration:.1f}s "
+                            f"(cache read: {cache_read}, cache write: {cache_write})"
+                        )
+                    else:
+                        logger.info(f"Claude API call successful in {duration:.1f}s")
+                else:
+                    logger.info(f"Claude API call successful in {duration:.1f}s")
                 return True, response_text, ""
                 
             except Exception as e:
@@ -156,15 +175,34 @@ class ClaudeAPIClient:
             Tuple of (success, analysis_result, error_message)
         """
         try:
-            # Generate analysis prompt with file content
-            prompt = self._generate_single_finding_prompt(finding, pr_context, custom_filtering_instructions)
-            system_prompt = self._generate_system_prompt()
-            
-            # Call Claude API
+            # Split the prompt into a static prefix (identical for every
+            # finding within a run — cacheable) and a dynamic suffix that
+            # carries the PR/finding-specific content. A single ephemeral
+            # cache breakpoint on the user static prefix is sufficient: the
+            # cumulative prefix it captures (system + intro + filtering rules
+            # + scoring + format spec) is ~1.6k tokens, comfortably above the
+            # 1,024-token Sonnet/Opus minimum cacheable size. The system
+            # prompt alone is too small (~75 tokens) to be worth its own
+            # breakpoint — anything under the minimum is silently not cached.
+            static_prefix = self._generate_static_prefix(custom_filtering_instructions)
+            dynamic_suffix = self._generate_dynamic_suffix(finding, pr_context)
+
+            user_blocks = [
+                {
+                    "type": "text",
+                    "text": static_prefix,
+                    "cache_control": {"type": "ephemeral"},
+                },
+                {
+                    "type": "text",
+                    "text": dynamic_suffix,
+                },
+            ]
+
             success, response_text, error_msg = self.call_with_retry(
-                prompt=prompt,
-                system_prompt=system_prompt,
-                max_tokens=PROMPT_TOKEN_LIMIT 
+                prompt=user_blocks,
+                system_prompt=self._generate_system_prompt(),
+                max_tokens=PROMPT_TOKEN_LIMIT
             )
             
             if not success:
@@ -193,29 +231,47 @@ You must maintain high recall (don't miss real vulnerabilities) while improving 
 Respond ONLY with valid JSON in the exact format specified in the user prompt.
 Do not include explanatory text, markdown formatting, or code blocks."""
     
-    def _generate_single_finding_prompt(self, 
-                                       finding: Dict[str, Any], 
+    def _generate_single_finding_prompt(self,
+                                       finding: Dict[str, Any],
                                        pr_context: Optional[Dict[str, Any]] = None,
                                        custom_filtering_instructions: Optional[str] = None) -> str:
         """Generate prompt for analyzing a single security finding.
-        
+
+        Concatenates the static prefix and dynamic suffix into one string.
+        Kept for callers/tests that want a single string; prompt-caching
+        callers should use :meth:`_generate_static_prefix` and
+        :meth:`_generate_dynamic_suffix` separately so the static block can
+        be marked ``cache_control: ephemeral``.
+
         Args:
             finding: Single security finding
             pr_context: Optional PR context
-            
+
         Returns:
             Formatted prompt string
         """
+        return (
+            self._generate_static_prefix(custom_filtering_instructions)
+            + "\n\n"
+            + self._generate_dynamic_suffix(finding, pr_context)
+        )
+
+    def _generate_dynamic_suffix(self,
+                                 finding: Dict[str, Any],
+                                 pr_context: Optional[Dict[str, Any]] = None) -> str:
+        """Build the per-call portion of the prompt (PR/finding-specific).
+
+        This text changes on every call and is NOT cacheable.
+        """
         pr_info = ""
         if pr_context and isinstance(pr_context, dict):
-            pr_info = f"""
-PR Context:
+            pr_info = f"""PR Context:
 - Repository: {pr_context.get('repo_name', 'unknown')}
 - PR #{pr_context.get('pr_number', 'unknown')}
 - Title: {pr_context.get('title', 'unknown')}
 - Description: {(pr_context.get('description') or 'No description')[:500]}...
 """
-        
+
         # Get file content if available
         file_path = finding.get('file', '')
         file_content = ""
@@ -233,9 +289,25 @@ File Content ({file_path}):
 
 File Content ({file_path}): Error reading file - {error}
 """
-        
+
         finding_json = json.dumps(finding, indent=2)
-        
+
+        return f"""{pr_info}
+Finding to analyze:
+```json
+{finding_json}
+```
+{file_content}"""
+
+    def _generate_static_prefix(self,
+                                custom_filtering_instructions: Optional[str] = None) -> str:
+        """Build the cacheable prefix shared across every finding in a run.
+
+        This text is identical for every call within a PR (and across PRs
+        when ``custom_filtering_instructions`` is unchanged), so it is wrapped
+        with ``cache_control: ephemeral`` in :meth:`analyze_single_finding`.
+        Keep this method pure and side-effect-free.
+        """
         # Use custom filtering instructions if provided, otherwise use defaults
         if custom_filtering_instructions:
             filtering_section = custom_filtering_instructions
@@ -285,20 +357,12 @@ PRECEDENTS -
         
         return f"""I need you to analyze a security finding from an automated code audit and determine if it's a false positive.
 
-{pr_info}
-
 {filtering_section}
 
 Assign a confidence score from 1-10:
 - 1-3: Low confidence, likely false positive or noise
-- 4-6: Medium confidence, needs investigation  
+- 4-6: Medium confidence, needs investigation
 - 7-10: High confidence, likely true vulnerability
-
-Finding to analyze:
-```json
-{finding_json}
-```
-{file_content}
 
 Respond with EXACTLY this JSON structure (no markdown, no code blocks):
 {{
@@ -307,7 +371,9 @@ Respond with EXACTLY this JSON structure (no markdown, no code blocks):
   "keep_finding": true,
   "exclusion_reason": null,
   "justification": "Clear SQL injection vulnerability with specific exploit path"
-}}"""
+}}
+
+The PR context, the finding to analyze, and the relevant file content follow below."""
 
     
     def _read_file(self, file_path: str) -> Tuple[bool, str, str]:
