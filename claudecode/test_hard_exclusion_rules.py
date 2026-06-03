@@ -396,6 +396,42 @@ class TestHardExclusionRules:
             reason = HardExclusionRules.get_exclusion_reason(finding)
             assert reason is None  # Should NOT be excluded
     
+    def test_memory_safety_not_excluded_cpp_header_and_alt_extensions(self):
+        """Memory safety findings in common C++ extensions beyond .c/.cc/.cpp/.h
+        (e.g. .hpp, .hh, .cxx, .hxx, .ipp) must NOT be excluded; these headers are
+        exactly where inline/template memory-safety bugs live."""
+        cpp_memory_findings = [
+            {
+                "title": "Buffer overflow",
+                "description": "Stack buffer overflow in inline function",
+                "file": "object.hpp"
+            },
+            {
+                "title": "Use after free",
+                "description": "Use after free in template destructor",
+                "file": "engine.cxx"
+            },
+            {
+                "title": "Out of bounds",
+                "description": "Array index out of bounds",
+                "file": "view.hh"
+            },
+            {
+                "title": "Memory safety",
+                "description": "Dangling pointer dereference",
+                "file": "traits.hxx"
+            },
+            {
+                "title": "Bounds check missing",
+                "description": "No bounds checking on user input",
+                "file": "container.ipp"
+            },
+        ]
+
+        for finding in cpp_memory_findings:
+            reason = HardExclusionRules.get_exclusion_reason(finding)
+            assert reason is None  # Should NOT be excluded
+
     def test_memory_safety_exclusion_case_insensitive(self):
         """Test that file extension checking is case insensitive."""
         findings = [
