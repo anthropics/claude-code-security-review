@@ -44,6 +44,8 @@ jobs:
 
 This action is not hardened against prompt injection attacks and should only be used to review trusted PRs. We recommend [configuring your repository](https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/enabling-features-for-your-repository/managing-github-actions-settings-for-a-repository#controlling-changes-from-forks-to-workflows-in-public-repositories) to use the "Require approval for all external contributors" option to ensure workflows only run after a maintainer has reviewed the PR.
 
+For production workflows, pin GitHub Actions dependencies to full 40-character commit SHAs instead of mutable tags or branches. This includes replacing the quick-start `anthropics/claude-code-security-review@main` reference with a reviewed commit SHA once you adopt the action.
+
 ## Configuration Options
 
 ### Action Inputs
