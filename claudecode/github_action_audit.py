@@ -18,6 +18,7 @@ import time
 from claudecode.prompts import get_security_audit_prompt
 from claudecode.findings_filter import FindingsFilter
 from claudecode.json_parser import parse_json_with_fallbacks
+from claudecode.workflow_security import find_unpinned_github_actions
 from claudecode.constants import (
     EXIT_CONFIGURATION_ERROR,
     DEFAULT_CLAUDE_MODEL,
@@ -600,6 +601,10 @@ def main():
         
         # Filter findings to reduce false positives
         original_findings = results.get('findings', [])
+        workflow_findings = find_unpinned_github_actions(pr_diff)
+        if workflow_findings:
+            logger.info(f"Detected {len(workflow_findings)} unpinned workflow action references")
+            original_findings = original_findings + workflow_findings
         
         # Prepare PR context for better filtering
         pr_context = {
