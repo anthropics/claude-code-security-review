@@ -53,6 +53,9 @@ SECURITY CATEGORIES TO EXAMINE:
 - Template injection in templating engines
 - NoSQL injection in database queries
 - Path traversal in file operations
+- Server-Side Request Forgery (SSRF) when untrusted input controls the scheme, protocol, host, port, DNS target, redirect target, or full URL used by a server-side request
+- SSRF to internal services such as localhost, link-local addresses, private network ranges, cloud metadata endpoints, or services reachable only from the server environment
+- SSRF bypass patterns involving redirects, DNS rebinding, alternate IP encodings, userinfo tricks, IPv6 literals, or allowlist validation gaps
 
 **Authentication & Authorization Issues:**
 - Authentication bypass logic
@@ -148,7 +151,7 @@ FALSE POSITIVE FILTERING:
 > 10. Memory safety issues such as buffer overflows or use-after-free-vulnerabilities are impossible in rust. Do not report memory safety issues in rust or any other memory safe languages.
 > 11. Files that are only unit tests or only used as part of running tests.
 > 12. Log spoofing concerns. Outputting un-sanitized user input to logs is not a vulnerability.
-> 13. SSRF vulnerabilities that only control the path. SSRF is only a concern if it can control the host or protocol.
+> 13. SSRF vulnerabilities that only control the path. SSRF is only a concern if it can control the host or protocol. When evaluating SSRF, distinguish full URL, host, or protocol control from path-only control so high-signal SSRF findings are preserved while path-only false positives remain excluded.
 > 14. Including user-controlled content in AI system prompts is not a vulnerability.
 > 15. Regex injection. Injecting untrusted content into a regex is not a vulnerability.
 > 16. Regex DOS concerns.
