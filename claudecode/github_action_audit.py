@@ -323,10 +323,29 @@ class SimpleClaudeRunner:
             )
             
             if result.returncode == 0:
-                # Also check if API key is configured
-                api_key = os.environ.get('ANTHROPIC_API_KEY', '')
-                if not api_key:
-                    return False, "ANTHROPIC_API_KEY environment variable is not set"
+                # Accept either a static credential or keyless / environment-based
+                # auth (e.g. Workload Identity Federation, ANTHROPIC_AUTH_TOKEN),
+                # which the Claude CLI and Anthropic SDK resolve from the
+                # environment.
+                has_static_credential = bool(
+                    os.environ.get('ANTHROPIC_API_KEY')
+                    or os.environ.get('ANTHROPIC_AUTH_TOKEN')
+                )
+                has_wif = all(
+                    os.environ.get(var)
+                    for var in (
+                        'ANTHROPIC_FEDERATION_RULE_ID',
+                        'ANTHROPIC_ORGANIZATION_ID',
+                        'ANTHROPIC_SERVICE_ACCOUNT_ID',
+                    )
+                )
+                if not (has_static_credential or has_wif):
+                    return False, (
+                        "No Anthropic credentials configured. Set ANTHROPIC_API_KEY, "
+                        "or configure Workload Identity Federation "
+                        "(ANTHROPIC_FEDERATION_RULE_ID / ANTHROPIC_ORGANIZATION_ID / "
+                        "ANTHROPIC_SERVICE_ACCOUNT_ID)."
+                    )
                 return True, ""
             else:
                 error_msg = f"Claude Code returned exit code {result.returncode}"

@@ -38,16 +38,21 @@ class ClaudeAPIClient:
         self.timeout_seconds = timeout_seconds or DEFAULT_TIMEOUT_SECONDS
         self.max_retries = max_retries or DEFAULT_MAX_RETRIES
         
-        # Get API key from environment or parameter
+        # Resolve auth. An explicit key (arg or ANTHROPIC_API_KEY) is used
+        # directly. Otherwise, fall through to the SDK's own credential
+        # resolution rather than failing hard -- this enables keyless auth such
+        # as Workload Identity Federation (ANTHROPIC_FEDERATION_RULE_ID /
+        # ANTHROPIC_ORGANIZATION_ID / ANTHROPIC_SERVICE_ACCOUNT_ID plus an OIDC
+        # identity token) and ANTHROPIC_AUTH_TOKEN, all of which the Anthropic
+        # SDK auto-detects from the environment.
         self.api_key = api_key or os.environ.get("ANTHROPIC_API_KEY")
-        if not self.api_key:
-            raise ValueError(
-                "No Anthropic API key found. Please set ANTHROPIC_API_KEY environment variable "
-                "or provide api_key parameter."
-            )
-        
-        # Initialize Anthropic client
-        self.client = Anthropic(api_key=self.api_key)
+        if self.api_key:
+            self.client = Anthropic(api_key=self.api_key)
+        else:
+            # No static key -- let the SDK auto-detect credentials from the
+            # environment. It raises a clear authentication error at call time
+            # if nothing is configured.
+            self.client = Anthropic()
         logger.info("Claude API client initialized successfully")
     
     def validate_api_access(self) -> Tuple[bool, str]:
