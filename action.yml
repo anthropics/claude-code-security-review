@@ -168,7 +168,9 @@ runs:
         echo "::group::Install Deps"
         if [ "${{ steps.claudecode-check.outputs.enable_claudecode }}" == "true" ]; then
           pip install -r "$ACTION_PATH/claudecode/requirements.txt"
-          npm install -g @anthropic-ai/claude-code
+          # Pin the Claude Code CLI so a compromised/unexpected upstream release
+          # is not pulled automatically at action-run time. Bump via Dependabot.
+          npm install -g @anthropic-ai/claude-code@2.1.212
         fi
         sudo apt-get update && sudo apt-get install -y jq
         echo "::endgroup::"
