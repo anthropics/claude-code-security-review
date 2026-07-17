@@ -320,23 +320,29 @@ Respond with EXACTLY this JSON structure (no markdown, no code blocks):
             Tuple of (success, formatted_content, error_message)
         """
         try:
-            # Check if REPO_PATH is set and use it as base path
-            repo_path = os.environ.get('REPO_PATH')
-            if repo_path:
-                # Convert file_path to Path and check if it's absolute
-                path = Path(file_path)
-                if not path.is_absolute():
-                    # Make it relative to REPO_PATH
-                    path = Path(repo_path) / file_path
-            else:
-                path = Path(file_path)
-            
+            # `file_path` comes from the model's findings output and must be treated
+            # as untrusted: an absolute path or `..` traversal (or a symlink inside
+            # the repo pointing elsewhere) could otherwise read arbitrary files on
+            # the runner (e.g. secrets) and leak their contents into the filtering
+            # prompt. Resolve every candidate under a trusted base directory (the
+            # scanned repo) and refuse anything that escapes it.
+            base_dir = Path(os.environ.get('REPO_PATH') or Path.cwd()).resolve()
+
+            candidate = Path(file_path)
+            resolved = (candidate if candidate.is_absolute() else base_dir / candidate).resolve()
+
+            # Enforce containment: resolved path must be the base dir or inside it.
+            if resolved != base_dir and base_dir not in resolved.parents:
+                return False, "", f"Refusing to read file outside repository: {file_path}"
+
+            path = resolved
+
             if not path.exists():
                 return False, "", f"File not found: {path}"
-            
+
             if not path.is_file():
                 return False, "", f"Path is not a file: {path}"
-            
+
             # Read file with error handling for encoding issues
             try:
                 with open(path, 'r', encoding='utf-8') as f:
@@ -345,7 +351,7 @@ Respond with EXACTLY this JSON structure (no markdown, no code blocks):
                 # Try with latin-1 encoding as fallback
                 with open(path, 'r', encoding='latin-1') as f:
                     content = f.read()
-            
+
             return True, content, ""
             
         except Exception as e:
