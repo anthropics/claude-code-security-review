@@ -44,6 +44,15 @@ jobs:
 
 This action is not hardened against prompt injection attacks and should only be used to review trusted PRs. We recommend [configuring your repository](https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/enabling-features-for-your-repository/managing-github-actions-settings-for-a-repository#controlling-changes-from-forks-to-workflows-in-public-repositories) to use the "Require approval for all external contributors" option to ensure workflows only run after a maintainer has reviewed the PR.
 
+**Only the first commit of a PR is scanned by default.** To avoid re-analyzing the same code, the action records a per-PR marker (via the Actions cache) after its first run and skips subsequent runs for that PR. This means commits pushed *after* the initial scan are **not** reviewed by default — an author could open a benign PR that passes review and then push additional (potentially vulnerable) commits that never get scanned. If you rely on this action as a security gate, set `run-every-commit: true` so every commit is analyzed:
+
+```yaml
+      - uses: anthropics/claude-code-security-review@main
+        with:
+          claude-api-key: ${{ secrets.CLAUDE_API_KEY }}
+          run-every-commit: true
+```
+
 ## Configuration Options
 
 ### Action Inputs
@@ -56,7 +65,7 @@ This action is not hardened against prompt injection attacks and should only be 
 | `exclude-directories` | Comma-separated list of directories to exclude from scanning | None | No |
 | `claude-model` | Claude [model name](https://docs.anthropic.com/en/docs/about-claude/models/overview#model-names) to use. Defaults to Opus 4.1. | `claude-opus-4-1-20250805` | No |
 | `claudecode-timeout` | Timeout for ClaudeCode analysis in minutes | `20` | No |
-| `run-every-commit` | Run ClaudeCode on every commit (skips cache check). Warning: May increase false positives on PRs with many commits. | `false` | No |
+| `run-every-commit` | Run ClaudeCode on every commit (skips cache check). Recommended when using this action as a security gate — see [Security Considerations](#security-considerations). Warning: May increase false positives on PRs with many commits. | `false` | No |
 | `false-positive-filtering-instructions` | Path to custom false positive filtering instructions text file | None | No |
 | `custom-security-scan-instructions` | Path to custom security scan instructions text file to append to audit prompt | None | No |
 
