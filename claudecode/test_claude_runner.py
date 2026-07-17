@@ -167,7 +167,7 @@ class TestSimpleClaudeRunner:
             'claude',
             '--output-format', 'json',
             '--model', DEFAULT_CLAUDE_MODEL,
-            '--disallowed-tools', 'Bash(ps:*)'
+            '--allowed-tools', 'Read Glob Grep LS'
         ]
         assert call_args[1]['input'] == 'test prompt'
         assert call_args[1]['cwd'] == Path('/tmp/test')

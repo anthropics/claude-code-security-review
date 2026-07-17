@@ -221,11 +221,17 @@ class SimpleClaudeRunner:
         try:
             # Construct Claude Code command
             # Use stdin for prompt to avoid "argument list too long" error
+            # Restrict Claude Code to read-only repository-exploration tools while
+            # it analyzes untrusted PR code. An allow-list (default-deny) is far
+            # safer than only denying `Bash(ps:*)`: it prevents prompt injection in
+            # the diff/PR from driving command execution, file writes, or secret
+            # exfiltration (ANTHROPIC_API_KEY / GITHUB_TOKEN) on the runner. The
+            # audit only needs to read and search the codebase and emit JSON.
             cmd = [
                 'claude',
                 '--output-format', 'json',
                 '--model', DEFAULT_CLAUDE_MODEL,
-                '--disallowed-tools', 'Bash(ps:*)'
+                '--allowed-tools', 'Read Glob Grep LS'
             ]
             
             # Run Claude Code with retry logic
