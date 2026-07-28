@@ -410,13 +410,17 @@ def initialize_findings_filter(custom_filtering_instructions: Optional[str] = No
         # Check if we should use Claude API filtering
         use_claude_filtering = os.environ.get('ENABLE_CLAUDE_FILTERING', 'false').lower() == 'true'
         api_key = os.environ.get('ANTHROPIC_API_KEY')
-        
+        # Optional Anthropic-compatible base URL for an alternate provider
+        # endpoint (for example the MiniMax Anthropic-compatible endpoint).
+        base_url = os.environ.get('ANTHROPIC_BASE_URL') or None
+
         if use_claude_filtering and api_key:
             # Use full filtering with Claude API
             return FindingsFilter(
                 use_hard_exclusions=True,
                 use_claude_filtering=True,
                 api_key=api_key,
+                base_url=base_url,
                 custom_filtering_instructions=custom_filtering_instructions
             )
         else:

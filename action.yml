@@ -33,6 +33,11 @@ inputs:
     required: false
     default: ''
 
+  claude-base-url:
+    description: 'Optional Anthropic-compatible base URL. Set this to route API calls through an Anthropic-compatible provider endpoint (for example the MiniMax Anthropic-compatible endpoint). Leave empty to use the default Anthropic API.'
+    required: false
+    default: ''
+
   run-every-commit:
     description: 'Run ClaudeCode on every commit (skips cache check). Warning: This may lead to more false positives on PRs with many commits as the AI analyzes the same code multiple times.'
     required: false
@@ -182,11 +187,12 @@ runs:
         GITHUB_REPOSITORY: ${{ github.repository }}
         PR_NUMBER: ${{ github.event.pull_request.number }}
         ANTHROPIC_API_KEY: ${{ inputs.claude-api-key }}
-        ENABLE_CLAUDE_FILTERING: 'true' 
+        ENABLE_CLAUDE_FILTERING: 'true'
         EXCLUDE_DIRECTORIES: ${{ inputs.exclude-directories }}
         FALSE_POSITIVE_FILTERING_INSTRUCTIONS: ${{ inputs.false-positive-filtering-instructions }}
         CUSTOM_SECURITY_SCAN_INSTRUCTIONS: ${{ inputs.custom-security-scan-instructions }}
         CLAUDE_MODEL: ${{ inputs.claude-model }}
+        ANTHROPIC_BASE_URL: ${{ inputs.claude-base-url }}
         CLAUDECODE_TIMEOUT: ${{ inputs.claudecode-timeout }}
         ACTION_PATH: ${{ github.action_path }}
       run: |
