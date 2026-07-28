@@ -135,3 +135,64 @@ class TestGetClaudeAPIClient:
         assert client.model == DEFAULT_CLAUDE_MODEL
         _, kwargs = mock_anthropic.call_args
         assert "base_url" not in kwargs
+
+
+class TestClaudeAPIClientProviderRegistry:
+    """Test resolving endpoints and model facts through the provider registry."""
+
+    @patch('claudecode.claude_api_client.Anthropic')
+    def test_provider_resolves_default_region_base_url(self, mock_anthropic):
+        """A provider name resolves the default region Anthropic-compatible URL."""
+        client = ClaudeAPIClient(
+            api_key="test-key",
+            provider="minimax",
+            model="MiniMax-M3",
+        )
+
+        assert client.provider == "minimax"
+        assert client.base_url == MINIMAX_GLOBAL_BASE_URL
+        _, kwargs = mock_anthropic.call_args
+        assert kwargs["base_url"] == MINIMAX_GLOBAL_BASE_URL
+
+    @patch('claudecode.claude_api_client.Anthropic')
+    def test_provider_resolves_regional_base_url(self, mock_anthropic):
+        """A region selects the matching Anthropic-compatible endpoint."""
+        client = ClaudeAPIClient(
+            api_key="test-key",
+            provider="minimax",
+            region="cn_zh",
+            model="MiniMax-M2.7",
+        )
+
+        assert client.region == "cn_zh"
+        assert client.base_url == MINIMAX_CHINA_BASE_URL
+        _, kwargs = mock_anthropic.call_args
+        assert kwargs["base_url"] == MINIMAX_CHINA_BASE_URL
+
+    @patch('claudecode.claude_api_client.Anthropic')
+    def test_explicit_base_url_overrides_provider(self, mock_anthropic):
+        """An explicit base_url takes precedence over the provider registry."""
+        client = ClaudeAPIClient(
+            api_key="test-key",
+            base_url=MINIMAX_GLOBAL_BASE_URL,
+            provider="minimax",
+            region="cn_zh",
+        )
+
+        assert client.base_url == MINIMAX_GLOBAL_BASE_URL
+
+    @patch('claudecode.claude_api_client.Anthropic')
+    def test_get_claude_api_client_forwards_provider(self, mock_anthropic):
+        """The factory forwards provider and region to the client."""
+        client = get_claude_api_client(
+            api_key="test-key",
+            provider="minimax",
+            region="cn_zh",
+            model="MiniMax-M3",
+        )
+
+        assert client.provider == "minimax"
+        assert client.region == "cn_zh"
+        assert client.base_url == MINIMAX_CHINA_BASE_URL
+        assert client.model == "MiniMax-M3"
+

@@ -34,7 +34,17 @@ inputs:
     default: ''
 
   claude-base-url:
-    description: 'Optional Anthropic-compatible base URL. Set this to route API calls through an Anthropic-compatible provider endpoint (for example the MiniMax Anthropic-compatible endpoint). Leave empty to use the default Anthropic API.'
+    description: 'Optional Anthropic-compatible base URL. Set this to route API calls through an Anthropic-compatible provider endpoint (for example the MiniMax Anthropic-compatible endpoint). Leave empty to use the default Anthropic API or the claude-provider input.'
+    required: false
+    default: ''
+
+  claude-provider:
+    description: 'Optional Anthropic-compatible provider name registered in the provider registry (for example minimax). When set, the regional Anthropic-compatible endpoint is resolved from the registry unless claude-base-url is provided.'
+    required: false
+    default: ''
+
+  claude-region:
+    description: 'Optional region within the claude-provider (for example global_en or cn_zh) used to select the regional Anthropic-compatible endpoint.'
     required: false
     default: ''
 
@@ -193,6 +203,8 @@ runs:
         CUSTOM_SECURITY_SCAN_INSTRUCTIONS: ${{ inputs.custom-security-scan-instructions }}
         CLAUDE_MODEL: ${{ inputs.claude-model }}
         ANTHROPIC_BASE_URL: ${{ inputs.claude-base-url }}
+        CLAUDE_PROVIDER: ${{ inputs.claude-provider }}
+        CLAUDE_REGION: ${{ inputs.claude-region }}
         CLAUDECODE_TIMEOUT: ${{ inputs.claudecode-timeout }}
         ACTION_PATH: ${{ github.action_path }}
       run: |

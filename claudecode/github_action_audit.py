@@ -413,6 +413,10 @@ def initialize_findings_filter(custom_filtering_instructions: Optional[str] = No
         # Optional Anthropic-compatible base URL for an alternate provider
         # endpoint (for example the MiniMax Anthropic-compatible endpoint).
         base_url = os.environ.get('ANTHROPIC_BASE_URL') or None
+        # Optional provider/region to resolve the Anthropic-compatible endpoint
+        # from the provider registry when no explicit base URL is configured.
+        provider = os.environ.get('CLAUDE_PROVIDER') or None
+        region = os.environ.get('CLAUDE_REGION') or None
 
         if use_claude_filtering and api_key:
             # Use full filtering with Claude API
@@ -421,6 +425,8 @@ def initialize_findings_filter(custom_filtering_instructions: Optional[str] = No
                 use_claude_filtering=True,
                 api_key=api_key,
                 base_url=base_url,
+                provider=provider,
+                region=region,
                 custom_filtering_instructions=custom_filtering_instructions
             )
         else:

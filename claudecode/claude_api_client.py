@@ -14,6 +14,7 @@ from claudecode.constants import (
 )
 from claudecode.json_parser import parse_json_with_fallbacks
 from claudecode.logger import get_logger
+from claudecode.providers import get_anthropic_base_url, get_provider_model
 
 logger = get_logger(__name__)
 
@@ -25,6 +26,8 @@ class ClaudeAPIClient:
                  model: Optional[str] = None,
                  api_key: Optional[str] = None,
                  base_url: Optional[str] = None,
+                 provider: Optional[str] = None,
+                 region: Optional[str] = None,
                  timeout_seconds: Optional[int] = None,
                  max_retries: Optional[int] = None):
         """Initialize Claude API client.
@@ -36,6 +39,12 @@ class ClaudeAPIClient:
                 the ANTHROPIC_BASE_URL env var. When that is also unset, the Anthropic
                 SDK uses its default endpoint. Set this to route requests through an
                 Anthropic-compatible provider endpoint.
+            provider: Optional provider name registered in the provider registry.
+                When supplied, the Anthropic-compatible base URL is resolved from the
+                registry for ``region`` (or the provider default region) unless an
+                explicit ``base_url`` is given.
+            region: Optional region within the provider (for example ``global_en`` or
+                ``cn_zh``) used to select the regional endpoint.
             timeout_seconds: Request timeout in seconds
             max_retries: Maximum retry attempts for API calls
         """
@@ -51,10 +60,19 @@ class ClaudeAPIClient:
                 "or provide api_key parameter."
             )
 
-        # Resolve an optional Anthropic-compatible base URL (parameter takes
-        # precedence, then the ANTHROPIC_BASE_URL env var). This allows routing
-        # API calls through an Anthropic-compatible provider endpoint.
-        self.base_url = base_url or DEFAULT_ANTHROPIC_BASE_URL
+        # Resolve an optional Anthropic-compatible base URL. An explicit
+        # ``base_url`` takes precedence; otherwise a registered provider resolves
+        # the regional Anthropic-compatible endpoint; otherwise the
+        # ANTHROPIC_BASE_URL env var is used. This allows routing API calls
+        # through an Anthropic-compatible provider endpoint.
+        resolved_base_url = base_url
+        if resolved_base_url is None and provider:
+            resolved_base_url = get_anthropic_base_url(provider, region)
+        if resolved_base_url is None:
+            resolved_base_url = DEFAULT_ANTHROPIC_BASE_URL
+        self.base_url = resolved_base_url
+        self.provider = provider
+        self.region = region
 
         # Initialize Anthropic client
         client_kwargs = {"api_key": self.api_key}
@@ -370,6 +388,8 @@ Respond with EXACTLY this JSON structure (no markdown, no code blocks):
 def get_claude_api_client(model: str = DEFAULT_CLAUDE_MODEL,
                          api_key: Optional[str] = None,
                          base_url: Optional[str] = None,
+                         provider: Optional[str] = None,
+                         region: Optional[str] = None,
                          timeout_seconds: int = DEFAULT_TIMEOUT_SECONDS) -> ClaudeAPIClient:
     """Convenience function to get Claude API client.
 
@@ -377,7 +397,10 @@ def get_claude_api_client(model: str = DEFAULT_CLAUDE_MODEL,
         model: Claude model identifier
         api_key: Optional API key (reads from environment if not provided)
         base_url: Optional Anthropic-compatible base URL (reads from
-            ANTHROPIC_BASE_URL env var when None)
+            ANTHROPIC_BASE_URL env var when None and no provider is given)
+        provider: Optional provider name to resolve the base URL from the
+            provider registry
+        region: Optional region within the provider
         timeout_seconds: API call timeout
 
     Returns:
@@ -387,6 +410,8 @@ def get_claude_api_client(model: str = DEFAULT_CLAUDE_MODEL,
         model=model,
         api_key=api_key,
         base_url=base_url,
+        provider=provider,
+        region=region,
         timeout_seconds=timeout_seconds,
     )
 

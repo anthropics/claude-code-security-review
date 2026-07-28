@@ -163,6 +163,8 @@ class FindingsFilter:
                  api_key: Optional[str] = None,
                  model: str = DEFAULT_CLAUDE_MODEL,
                  base_url: Optional[str] = None,
+                 provider: Optional[str] = None,
+                 region: Optional[str] = None,
                  custom_filtering_instructions: Optional[str] = None):
         """Initialize findings filter.
 
@@ -172,7 +174,11 @@ class FindingsFilter:
             api_key: Anthropic API key for Claude filtering
             model: Claude model to use for filtering
             base_url: Optional Anthropic-compatible base URL for an alternate
-                provider endpoint (reads from ANTHROPIC_BASE_URL when None)
+                provider endpoint (reads from ANTHROPIC_BASE_URL when None and no
+                provider is given)
+            provider: Optional provider name registered in the provider registry
+                used to resolve the Anthropic-compatible base URL
+            region: Optional region within the provider selecting the endpoint
             custom_filtering_instructions: Optional custom filtering instructions
         """
         self.use_hard_exclusions = use_hard_exclusions
@@ -187,6 +193,8 @@ class FindingsFilter:
                     model=model,
                     api_key=api_key,
                     base_url=base_url,
+                    provider=provider,
+                    region=region,
                 )
                 # Validate API access
                 valid, error = self.claude_client.validate_api_access()

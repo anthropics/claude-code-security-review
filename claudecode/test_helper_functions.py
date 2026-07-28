@@ -117,6 +117,8 @@ class TestHelperFunctions:
                 use_claude_filtering=True,
                 api_key='test-key-123',
                 base_url=None,
+                provider=None,
+                region=None,
                 custom_filtering_instructions=None
             )
     
@@ -153,6 +155,34 @@ class TestHelperFunctions:
                 use_claude_filtering=True,
                 api_key='test-key-123',
                 base_url='https://api.minimax.io/anthropic',
+                provider=None,
+                region=None,
+                custom_filtering_instructions=None
+            )
+
+    @patch('claudecode.github_action_audit.FindingsFilter')
+    def test_initialize_findings_filter_with_provider(self, mock_filter):
+        """Test initializing findings filter forwards provider and region."""
+        mock_filter_instance = MagicMock()
+        mock_filter.return_value = mock_filter_instance
+
+        with patch.dict(os.environ, {
+            'ENABLE_CLAUDE_FILTERING': 'true',
+            'ANTHROPIC_API_KEY': 'test-key-123',
+            'ANTHROPIC_BASE_URL': '',
+            'CLAUDE_PROVIDER': 'minimax',
+            'CLAUDE_REGION': 'cn_zh'
+        }):
+            result = initialize_findings_filter()
+
+            assert result == mock_filter_instance
+            mock_filter.assert_called_once_with(
+                use_hard_exclusions=True,
+                use_claude_filtering=True,
+                api_key='test-key-123',
+                base_url=None,
+                provider='minimax',
+                region='cn_zh',
                 custom_filtering_instructions=None
             )
 
