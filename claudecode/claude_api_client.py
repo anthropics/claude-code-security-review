@@ -10,10 +10,11 @@ from anthropic import Anthropic
 
 from claudecode.constants import (
     DEFAULT_CLAUDE_MODEL, DEFAULT_TIMEOUT_SECONDS, DEFAULT_MAX_RETRIES,
-    RATE_LIMIT_BACKOFF_MAX, PROMPT_TOKEN_LIMIT,
+    RATE_LIMIT_BACKOFF_MAX, PROMPT_TOKEN_LIMIT, DEFAULT_ANTHROPIC_BASE_URL,
 )
 from claudecode.json_parser import parse_json_with_fallbacks
 from claudecode.logger import get_logger
+from claudecode.providers import get_anthropic_base_url, get_provider, get_provider_model
 
 logger = get_logger(__name__)
 
@@ -21,23 +22,46 @@ logger = get_logger(__name__)
 class ClaudeAPIClient:
     """Client for calling Claude API directly for security analysis tasks."""
     
-    def __init__(self, 
+    def __init__(self,
                  model: Optional[str] = None,
                  api_key: Optional[str] = None,
+                 base_url: Optional[str] = None,
+                 provider: Optional[str] = None,
+                 region: Optional[str] = None,
                  timeout_seconds: Optional[int] = None,
                  max_retries: Optional[int] = None):
         """Initialize Claude API client.
-        
+
         Args:
             model: Claude model to use
             api_key: Anthropic API key (if None, reads from ANTHROPIC_API_KEY env var)
+            base_url: Optional Anthropic-compatible base URL. When None, reads from
+                the ANTHROPIC_BASE_URL env var. When that is also unset, the Anthropic
+                SDK uses its default endpoint. Set this to route requests through an
+                Anthropic-compatible provider endpoint.
+            provider: Optional provider name registered in the provider registry.
+                When supplied, the Anthropic-compatible base URL is resolved from the
+                registry for ``region`` (or the provider default region) unless an
+                explicit ``base_url`` is given.
+            region: Optional region within the provider (for example ``global_en`` or
+                ``cn_zh``) used to select the regional endpoint.
             timeout_seconds: Request timeout in seconds
             max_retries: Maximum retry attempts for API calls
         """
-        self.model = model or DEFAULT_CLAUDE_MODEL
+        provider_config = get_provider(provider) if provider else None
+        if provider and provider_config is None:
+            raise ValueError(f"Unknown Anthropic-compatible provider: {provider}")
+
+        self.model = model or (
+            provider_config.get("model_id") if provider_config else DEFAULT_CLAUDE_MODEL
+        )
+        if provider_config and get_provider_model(provider, self.model) is None:
+            raise ValueError(
+                f"Model {self.model} is not registered for provider {provider}"
+            )
         self.timeout_seconds = timeout_seconds or DEFAULT_TIMEOUT_SECONDS
         self.max_retries = max_retries or DEFAULT_MAX_RETRIES
-        
+
         # Get API key from environment or parameter
         self.api_key = api_key or os.environ.get("ANTHROPIC_API_KEY")
         if not self.api_key:
@@ -45,9 +69,30 @@ class ClaudeAPIClient:
                 "No Anthropic API key found. Please set ANTHROPIC_API_KEY environment variable "
                 "or provide api_key parameter."
             )
-        
+
+        # Resolve an optional Anthropic-compatible base URL. An explicit
+        # ``base_url`` takes precedence; otherwise a registered provider resolves
+        # the regional Anthropic-compatible endpoint; otherwise the
+        # ANTHROPIC_BASE_URL env var is used. This allows routing API calls
+        # through an Anthropic-compatible provider endpoint.
+        resolved_base_url = base_url
+        if resolved_base_url is None and provider:
+            resolved_base_url = get_anthropic_base_url(provider, region)
+            if resolved_base_url is None:
+                raise ValueError(
+                    f"Unknown region {region} for provider {provider}"
+                )
+        if resolved_base_url is None:
+            resolved_base_url = DEFAULT_ANTHROPIC_BASE_URL
+        self.base_url = resolved_base_url
+        self.provider = provider
+        self.region = region
+
         # Initialize Anthropic client
-        self.client = Anthropic(api_key=self.api_key)
+        client_kwargs = {"api_key": self.api_key}
+        if self.base_url:
+            client_kwargs["base_url"] = self.base_url
+        self.client = Anthropic(**client_kwargs)
         logger.info("Claude API client initialized successfully")
     
     def validate_api_access(self) -> Tuple[bool, str]:
@@ -354,23 +399,33 @@ Respond with EXACTLY this JSON structure (no markdown, no code blocks):
             return False, "", error_msg
 
 
-def get_claude_api_client(model: str = DEFAULT_CLAUDE_MODEL,
+def get_claude_api_client(model: Optional[str] = None,
                          api_key: Optional[str] = None,
+                         base_url: Optional[str] = None,
+                         provider: Optional[str] = None,
+                         region: Optional[str] = None,
                          timeout_seconds: int = DEFAULT_TIMEOUT_SECONDS) -> ClaudeAPIClient:
     """Convenience function to get Claude API client.
-    
+
     Args:
         model: Claude model identifier
         api_key: Optional API key (reads from environment if not provided)
+        base_url: Optional Anthropic-compatible base URL (reads from
+            ANTHROPIC_BASE_URL env var when None and no provider is given)
+        provider: Optional provider name to resolve the base URL from the
+            provider registry
+        region: Optional region within the provider
         timeout_seconds: API call timeout
-        
+
     Returns:
         Initialized ClaudeAPIClient instance
     """
     return ClaudeAPIClient(
         model=model,
         api_key=api_key,
-        timeout_seconds=timeout_seconds
+        base_url=base_url,
+        provider=provider,
+        region=region,
+        timeout_seconds=timeout_seconds,
     )
-
 

@@ -54,7 +54,10 @@ This action is not hardened against prompt injection attacks and should only be 
 | `comment-pr` | Whether to comment on PRs with findings | `true` | No |
 | `upload-results` | Whether to upload results as artifacts | `true` | No |
 | `exclude-directories` | Comma-separated list of directories to exclude from scanning | None | No |
-| `claude-model` | Claude [model name](https://docs.anthropic.com/en/docs/about-claude/models/overview#model-names) to use. Defaults to Opus 4.1. | `claude-opus-4-1-20250805` | No |
+| `claude-model` | Model name to use. Defaults to the selected provider's default model, or Opus 4.1 when no provider is selected. | Provider default or `claude-opus-4-1-20250805` | No |
+| `claude-base-url` | Optional Anthropic-compatible base URL. Set this to route API calls (Claude Code and the findings filter) through an Anthropic-compatible provider endpoint such as the MiniMax Anthropic-compatible endpoint. Leave empty to use the default Anthropic API or `claude-provider`. | None | No |
+| `claude-provider` | Optional Anthropic-compatible provider name registered in the provider registry (for example `minimax`). When set, the regional Anthropic-compatible endpoint is resolved from the registry unless `claude-base-url` is provided. | None | No |
+| `claude-region` | Optional region within `claude-provider` (for example `global_en` or `cn_zh`) used to select the regional Anthropic-compatible endpoint. | None | No |
 | `claudecode-timeout` | Timeout for ClaudeCode analysis in minutes | `20` | No |
 | `run-every-commit` | Run ClaudeCode on every commit (skips cache check). Warning: May increase false positives on PRs with many commits. | `false` | No |
 | `false-positive-filtering-instructions` | Path to custom false positive filtering instructions text file | None | No |
@@ -67,6 +70,45 @@ This action is not hardened against prompt injection attacks and should only be 
 | `findings-count` | Total number of security findings |
 | `results-file` | Path to the results JSON file |
 
+### Anthropic-compatible Providers
+
+The action can route Claude API calls (Claude Code and the findings filter) through an Anthropic-compatible provider endpoint. Set `claude-provider` to a registered provider name and optionally `claude-region` to select a regional endpoint, or set `claude-base-url` directly to an Anthropic-compatible base URL. Leave both empty to use the default Anthropic API.
+
+The MiniMax provider defaults to `MiniMax-M3` and supports the following model identifiers and regional Anthropic-compatible endpoints:
+
+| Model ID | Context Window | Input Modalities | Thinking |
+|----------|---------------|------------------|----------|
+| `MiniMax-M3` | 1000000 | text, image, video | adaptive, disabled |
+| `MiniMax-M2.7` | 204800 | text | always_on |
+
+| Region | Anthropic-compatible base URL |
+|--------|------------------------------|
+| `global_en` | `https://api.minimax.io/anthropic` |
+| `cn_zh` | `https://api.minimaxi.com/anthropic` |
+
+Example using the MiniMax provider with the global endpoint:
+
+```yaml
+- uses: anthropics/claude-code-security-review@main
+  with:
+    comment-pr: true
+    claude-api-key: ${{ secrets.CLAUDE_API_KEY }}
+    claude-provider: minimax
+    claude-region: global_en
+    claude-model: MiniMax-M3
+```
+
+Example using an explicit Anthropic-compatible base URL for the China endpoint:
+
+```yaml
+- uses: anthropics/claude-code-security-review@main
+  with:
+    comment-pr: true
+    claude-api-key: ${{ secrets.CLAUDE_API_KEY }}
+    claude-base-url: https://api.minimaxi.com/anthropic
+    claude-model: MiniMax-M2.7
+```
+
 ## How It Works
 
 ### Architecture
@@ -77,6 +119,7 @@ claudecode/
 ├── prompts.py              # Security audit prompt templates
 ├── findings_filter.py      # False positive filtering logic
 ├── claude_api_client.py    # Claude API client for false positive filtering
+├── providers.py            # Anthropic-compatible provider registry
 ├── json_parser.py          # Robust JSON parsing utilities
 ├── requirements.txt        # Python dependencies
 ├── test_*.py               # Test suites

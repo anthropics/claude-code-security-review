@@ -171,6 +171,26 @@ class TestSimpleClaudeRunner:
         ]
         assert call_args[1]['input'] == 'test prompt'
         assert call_args[1]['cwd'] == Path('/tmp/test')
+
+    @patch('subprocess.run')
+    def test_run_security_audit_uses_configured_model(self, mock_run):
+        """The Claude Code command uses the model resolved from provider config."""
+        mock_run.return_value = Mock(
+            returncode=0,
+            stdout='{"findings": []}',
+            stderr=''
+        )
+
+        runner = SimpleClaudeRunner()
+        with patch.dict(os.environ, {'CLAUDE_MODEL': 'MiniMax-M3'}):
+            with patch('pathlib.Path.exists', return_value=True):
+                success, _, _ = runner.run_security_audit(
+                    Path('/tmp/test'),
+                    "test prompt"
+                )
+
+        assert success is True
+        assert mock_run.call_args[0][0][4] == 'MiniMax-M3'
     
     @patch('subprocess.run')
     def test_run_security_audit_large_prompt_warning(self, mock_run, capsys):
