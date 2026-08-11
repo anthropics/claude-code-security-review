@@ -26,6 +26,7 @@ from claudecode.constants import (
     SUBPROCESS_TIMEOUT
 )
 from claudecode.logger import get_logger
+from claudecode.providers import get_anthropic_base_url, get_provider, get_provider_model
 
 logger = get_logger(__name__)
 
@@ -221,10 +222,11 @@ class SimpleClaudeRunner:
         try:
             # Construct Claude Code command
             # Use stdin for prompt to avoid "argument list too long" error
+            model = os.environ.get('CLAUDE_MODEL') or DEFAULT_CLAUDE_MODEL
             cmd = [
                 'claude',
                 '--output-format', 'json',
-                '--model', DEFAULT_CLAUDE_MODEL,
+                '--model', model,
                 '--disallowed-tools', 'Bash(ps:*)'
             ]
             
@@ -417,6 +419,30 @@ def initialize_findings_filter(custom_filtering_instructions: Optional[str] = No
         # from the provider registry when no explicit base URL is configured.
         provider = os.environ.get('CLAUDE_PROVIDER') or None
         region = os.environ.get('CLAUDE_REGION') or None
+        model = os.environ.get('CLAUDE_MODEL') or None
+
+        if provider:
+            provider_config = get_provider(provider)
+            if provider_config is None:
+                raise ValueError(f"Unknown Anthropic-compatible provider: {provider}")
+
+            if model is None:
+                model = provider_config["model_id"]
+                os.environ['CLAUDE_MODEL'] = model
+            elif get_provider_model(provider, model) is None:
+                raise ValueError(
+                    f"Model {model} is not registered for provider {provider}"
+                )
+
+            if base_url is None:
+                base_url = get_anthropic_base_url(provider, region)
+                if base_url is None:
+                    raise ValueError(
+                        f"Unknown region {region} for provider {provider}"
+                    )
+                os.environ['ANTHROPIC_BASE_URL'] = base_url
+
+        model = model or DEFAULT_CLAUDE_MODEL
 
         if use_claude_filtering and api_key:
             # Use full filtering with Claude API
@@ -424,6 +450,7 @@ def initialize_findings_filter(custom_filtering_instructions: Optional[str] = No
                 use_hard_exclusions=True,
                 use_claude_filtering=True,
                 api_key=api_key,
+                model=model,
                 base_url=base_url,
                 provider=provider,
                 region=region,

@@ -155,6 +155,35 @@ class TestClaudeAPIClientProviderRegistry:
         assert kwargs["base_url"] == MINIMAX_GLOBAL_BASE_URL
 
     @patch('claudecode.claude_api_client.Anthropic')
+    def test_provider_resolves_default_model(self, mock_anthropic):
+        """A provider name uses its default model when no model is supplied."""
+        client = ClaudeAPIClient(
+            api_key="test-key",
+            provider="minimax",
+        )
+
+        assert client.model == "MiniMax-M3"
+
+    @pytest.mark.parametrize(
+        "kwargs,error",
+        [
+            ({"provider": "unknown"}, "Unknown Anthropic-compatible provider"),
+            (
+                {"provider": "minimax", "region": "unknown"},
+                "Unknown region unknown for provider minimax",
+            ),
+            (
+                {"provider": "minimax", "model": "unknown"},
+                "Model unknown is not registered for provider minimax",
+            ),
+        ],
+    )
+    def test_provider_rejects_unknown_configuration(self, kwargs, error):
+        """Unknown provider configuration fails instead of using Anthropic defaults."""
+        with pytest.raises(ValueError, match=error):
+            ClaudeAPIClient(api_key="test-key", **kwargs)
+
+    @patch('claudecode.claude_api_client.Anthropic')
     def test_provider_resolves_regional_base_url(self, mock_anthropic):
         """A region selects the matching Anthropic-compatible endpoint."""
         client = ClaudeAPIClient(
@@ -195,4 +224,3 @@ class TestClaudeAPIClientProviderRegistry:
         assert client.region == "cn_zh"
         assert client.base_url == MINIMAX_CHINA_BASE_URL
         assert client.model == "MiniMax-M3"
-

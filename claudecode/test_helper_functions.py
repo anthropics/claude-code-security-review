@@ -107,7 +107,10 @@ class TestHelperFunctions:
         with patch.dict(os.environ, {
             'ENABLE_CLAUDE_FILTERING': 'true',
             'ANTHROPIC_API_KEY': 'test-key-123',
-            'ANTHROPIC_BASE_URL': ''
+            'ANTHROPIC_BASE_URL': '',
+            'CLAUDE_MODEL': '',
+            'CLAUDE_PROVIDER': '',
+            'CLAUDE_REGION': ''
         }):
             result = initialize_findings_filter()
 
@@ -116,6 +119,7 @@ class TestHelperFunctions:
                 use_hard_exclusions=True,
                 use_claude_filtering=True,
                 api_key='test-key-123',
+                model='claude-opus-4-1-20250805',
                 base_url=None,
                 provider=None,
                 region=None,
@@ -145,7 +149,10 @@ class TestHelperFunctions:
         with patch.dict(os.environ, {
             'ENABLE_CLAUDE_FILTERING': 'true',
             'ANTHROPIC_API_KEY': 'test-key-123',
-            'ANTHROPIC_BASE_URL': 'https://api.minimax.io/anthropic'
+            'ANTHROPIC_BASE_URL': 'https://api.minimax.io/anthropic',
+            'CLAUDE_MODEL': '',
+            'CLAUDE_PROVIDER': '',
+            'CLAUDE_REGION': ''
         }):
             result = initialize_findings_filter()
 
@@ -154,6 +161,7 @@ class TestHelperFunctions:
                 use_hard_exclusions=True,
                 use_claude_filtering=True,
                 api_key='test-key-123',
+                model='claude-opus-4-1-20250805',
                 base_url='https://api.minimax.io/anthropic',
                 provider=None,
                 region=None,
@@ -171,20 +179,47 @@ class TestHelperFunctions:
             'ANTHROPIC_API_KEY': 'test-key-123',
             'ANTHROPIC_BASE_URL': '',
             'CLAUDE_PROVIDER': 'minimax',
-            'CLAUDE_REGION': 'cn_zh'
+            'CLAUDE_REGION': 'cn_zh',
+            'CLAUDE_MODEL': ''
         }):
             result = initialize_findings_filter()
 
             assert result == mock_filter_instance
+            assert os.environ['CLAUDE_MODEL'] == 'MiniMax-M3'
+            assert os.environ['ANTHROPIC_BASE_URL'] == 'https://api.minimaxi.com/anthropic'
             mock_filter.assert_called_once_with(
                 use_hard_exclusions=True,
                 use_claude_filtering=True,
                 api_key='test-key-123',
-                base_url=None,
+                model='MiniMax-M3',
+                base_url='https://api.minimaxi.com/anthropic',
                 provider='minimax',
                 region='cn_zh',
                 custom_filtering_instructions=None
             )
+
+    @pytest.mark.parametrize(
+        "env,error",
+        [
+            (
+                {'CLAUDE_PROVIDER': 'unknown'},
+                'Unknown Anthropic-compatible provider',
+            ),
+            (
+                {'CLAUDE_PROVIDER': 'minimax', 'CLAUDE_REGION': 'unknown'},
+                'Unknown region unknown for provider minimax',
+            ),
+            (
+                {'CLAUDE_PROVIDER': 'minimax', 'CLAUDE_MODEL': 'unknown'},
+                'Model unknown is not registered for provider minimax',
+            ),
+        ],
+    )
+    def test_initialize_findings_filter_rejects_unknown_provider_config(self, env, error):
+        """Invalid provider configuration is reported as a configuration error."""
+        with patch.dict(os.environ, env, clear=True):
+            with pytest.raises(ConfigurationError, match=error):
+                initialize_findings_filter()
 
     @patch('claudecode.github_action_audit.FindingsFilter')
     def test_initialize_findings_filter_with_defaults(self, mock_simple_filter):

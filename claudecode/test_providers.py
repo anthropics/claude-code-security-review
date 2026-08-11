@@ -68,6 +68,14 @@ class TestProviderRegistry:
         provider = get_provider("minimax")
         assert provider is not None
         assert provider["name"] == "minimax"
+        assert provider["model_id"] == "MiniMax-M3"
+        assert provider["model_ids"] == MINIMAX_MODEL_IDS
+        assert provider["reason_codes"] == {
+            "provider_add": "provider-add",
+            "model_add": "model-add",
+            "parameter_refresh": "parameter-refresh",
+            "input_capability": "input-capability",
+        }
 
     def test_get_provider_is_case_insensitive(self):
         """Provider lookup is case insensitive."""

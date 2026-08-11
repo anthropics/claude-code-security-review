@@ -54,7 +54,7 @@ This action is not hardened against prompt injection attacks and should only be 
 | `comment-pr` | Whether to comment on PRs with findings | `true` | No |
 | `upload-results` | Whether to upload results as artifacts | `true` | No |
 | `exclude-directories` | Comma-separated list of directories to exclude from scanning | None | No |
-| `claude-model` | Claude [model name](https://docs.anthropic.com/en/docs/about-claude/models/overview#model-names) to use. Defaults to Opus 4.1. | `claude-opus-4-1-20250805` | No |
+| `claude-model` | Model name to use. Defaults to the selected provider's default model, or Opus 4.1 when no provider is selected. | Provider default or `claude-opus-4-1-20250805` | No |
 | `claude-base-url` | Optional Anthropic-compatible base URL. Set this to route API calls (Claude Code and the findings filter) through an Anthropic-compatible provider endpoint such as the MiniMax Anthropic-compatible endpoint. Leave empty to use the default Anthropic API or `claude-provider`. | None | No |
 | `claude-provider` | Optional Anthropic-compatible provider name registered in the provider registry (for example `minimax`). When set, the regional Anthropic-compatible endpoint is resolved from the registry unless `claude-base-url` is provided. | None | No |
 | `claude-region` | Optional region within `claude-provider` (for example `global_en` or `cn_zh`) used to select the regional Anthropic-compatible endpoint. | None | No |
@@ -74,7 +74,7 @@ This action is not hardened against prompt injection attacks and should only be 
 
 The action can route Claude API calls (Claude Code and the findings filter) through an Anthropic-compatible provider endpoint. Set `claude-provider` to a registered provider name and optionally `claude-region` to select a regional endpoint, or set `claude-base-url` directly to an Anthropic-compatible base URL. Leave both empty to use the default Anthropic API.
 
-The MiniMax provider is registered with the following model identifiers and regional Anthropic-compatible endpoints:
+The MiniMax provider defaults to `MiniMax-M3` and supports the following model identifiers and regional Anthropic-compatible endpoints:
 
 | Model ID | Context Window | Input Modalities | Thinking |
 |----------|---------------|------------------|----------|

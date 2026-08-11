@@ -19,6 +19,14 @@ from typing import Any, Dict, List, Optional
 # million tokens), supported input modalities and available thinking modes.
 MINIMAX_PROVIDER: Dict[str, Any] = {
     "name": "minimax",
+    "reason_codes": {
+        "provider_add": "provider-add",
+        "model_add": "model-add",
+        "parameter_refresh": "parameter-refresh",
+        "input_capability": "input-capability",
+    },
+    "model_id": "MiniMax-M3",
+    "model_ids": ["MiniMax-M3", "MiniMax-M2.7"],
     "anthropic_base_url": "https://api.minimax.io/anthropic",
     "openai_base_url": "https://api.minimax.io/v1",
     "context_window": 1000000,

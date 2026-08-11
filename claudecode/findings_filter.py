@@ -6,7 +6,6 @@ import time
 from dataclasses import dataclass, field
 
 from claudecode.claude_api_client import ClaudeAPIClient
-from claudecode.constants import DEFAULT_CLAUDE_MODEL
 from claudecode.logger import get_logger
 
 logger = get_logger(__name__)
@@ -161,7 +160,7 @@ class FindingsFilter:
                  use_hard_exclusions: bool = True,
                  use_claude_filtering: bool = True,
                  api_key: Optional[str] = None,
-                 model: str = DEFAULT_CLAUDE_MODEL,
+                 model: Optional[str] = None,
                  base_url: Optional[str] = None,
                  provider: Optional[str] = None,
                  region: Optional[str] = None,
@@ -172,7 +171,8 @@ class FindingsFilter:
             use_hard_exclusions: Whether to apply hard exclusion rules
             use_claude_filtering: Whether to use Claude API for filtering
             api_key: Anthropic API key for Claude filtering
-            model: Claude model to use for filtering
+            model: Claude model to use for filtering. Registered providers use
+                their default model when this is unset.
             base_url: Optional Anthropic-compatible base URL for an alternate
                 provider endpoint (reads from ANTHROPIC_BASE_URL when None and no
                 provider is given)

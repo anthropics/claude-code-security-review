@@ -14,7 +14,7 @@ from claudecode.constants import (
 )
 from claudecode.json_parser import parse_json_with_fallbacks
 from claudecode.logger import get_logger
-from claudecode.providers import get_anthropic_base_url, get_provider_model
+from claudecode.providers import get_anthropic_base_url, get_provider, get_provider_model
 
 logger = get_logger(__name__)
 
@@ -48,7 +48,17 @@ class ClaudeAPIClient:
             timeout_seconds: Request timeout in seconds
             max_retries: Maximum retry attempts for API calls
         """
-        self.model = model or DEFAULT_CLAUDE_MODEL
+        provider_config = get_provider(provider) if provider else None
+        if provider and provider_config is None:
+            raise ValueError(f"Unknown Anthropic-compatible provider: {provider}")
+
+        self.model = model or (
+            provider_config.get("model_id") if provider_config else DEFAULT_CLAUDE_MODEL
+        )
+        if provider_config and get_provider_model(provider, self.model) is None:
+            raise ValueError(
+                f"Model {self.model} is not registered for provider {provider}"
+            )
         self.timeout_seconds = timeout_seconds or DEFAULT_TIMEOUT_SECONDS
         self.max_retries = max_retries or DEFAULT_MAX_RETRIES
 
@@ -68,6 +78,10 @@ class ClaudeAPIClient:
         resolved_base_url = base_url
         if resolved_base_url is None and provider:
             resolved_base_url = get_anthropic_base_url(provider, region)
+            if resolved_base_url is None:
+                raise ValueError(
+                    f"Unknown region {region} for provider {provider}"
+                )
         if resolved_base_url is None:
             resolved_base_url = DEFAULT_ANTHROPIC_BASE_URL
         self.base_url = resolved_base_url
@@ -385,7 +399,7 @@ Respond with EXACTLY this JSON structure (no markdown, no code blocks):
             return False, "", error_msg
 
 
-def get_claude_api_client(model: str = DEFAULT_CLAUDE_MODEL,
+def get_claude_api_client(model: Optional[str] = None,
                          api_key: Optional[str] = None,
                          base_url: Optional[str] = None,
                          provider: Optional[str] = None,
@@ -414,5 +428,4 @@ def get_claude_api_client(model: str = DEFAULT_CLAUDE_MODEL,
         region=region,
         timeout_seconds=timeout_seconds,
     )
-
 
