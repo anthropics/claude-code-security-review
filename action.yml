@@ -60,12 +60,31 @@ outputs:
 runs:
   using: 'composite'
   steps:
-    - name: Install GitHub CLI
+    - name: Ensure required system tools
       shell: bash
       run: |
-        echo "::group::Install gh CLI"
-        # Install GitHub CLI for PR operations
-        sudo apt-get update && sudo apt-get install -y gh
+        echo "::group::Ensure system tools"
+        # GitHub-hosted runners already include gh and jq. Avoid contacting
+        # package mirrors unless a custom runner is missing either tool.
+        missing_packages=()
+        command -v gh >/dev/null 2>&1 || missing_packages+=("gh")
+        command -v jq >/dev/null 2>&1 || missing_packages+=("jq")
+
+        if (( ${#missing_packages[@]} > 0 )); then
+          sudo apt-get \
+            -o Acquire::Retries=3 \
+            -o Acquire::http::Timeout=20 \
+            -o Acquire::https::Timeout=20 \
+            update
+          sudo apt-get \
+            -o Acquire::Retries=3 \
+            -o Acquire::http::Timeout=20 \
+            -o Acquire::https::Timeout=20 \
+            install -y "${missing_packages[@]}"
+        fi
+
+        gh --version
+        jq --version
         echo "::endgroup::"
     
     - name: Set up Python
@@ -170,7 +189,6 @@ runs:
           pip install -r "$ACTION_PATH/claudecode/requirements.txt"
           npm install -g @anthropic-ai/claude-code
         fi
-        sudo apt-get update && sudo apt-get install -y jq
         echo "::endgroup::"
     
     - name: Run ClaudeCode scan
