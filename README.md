@@ -126,6 +126,11 @@ The false positive filtering can also be tuned as needed for a given project's s
 
 ## Installation & Setup
 
+The action installs its Python and Node.js dependencies at runtime. It also
+uses `gh` and `jq`, both of which are preinstalled on GitHub-hosted runners.
+On custom runners where either tool is missing, the action installs it with
+bounded APT retries and network timeouts.
+
 ### GitHub Actions
 
 Follow the Quick Start guide above. The action handles all dependencies automatically.

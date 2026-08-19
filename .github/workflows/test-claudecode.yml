@@ -36,13 +36,13 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install pytest pytest-cov
+          pip install pytest pytest-cov PyYAML
           pip install -r claudecode/requirements.txt
 
       - name: Run ClaudeCode unit tests
         run: |
           export PYTHONPATH="${PYTHONPATH}:${PWD}"
-          pytest claudecode -v --cov=claudecode --cov-report=term-missing
+          pytest claudecode tests -v --cov=claudecode --cov-report=term-missing
 
       - name: Install Bun
         uses: oven-sh/setup-bun@b7a1c7ccf290d58743029c4f6903da283811b979 # v2.1.0 pinned to commit hash
