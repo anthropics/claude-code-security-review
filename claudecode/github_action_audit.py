@@ -16,6 +16,7 @@ import time
 
 # Import existing components we can reuse
 from claudecode.prompts import get_security_audit_prompt
+from claudecode.claude_api_client import ClaudeFilteringUnavailableError
 from claudecode.findings_filter import FindingsFilter
 from claudecode.json_parser import parse_json_with_fallbacks
 from claudecode.constants import (
@@ -425,6 +426,9 @@ def initialize_findings_filter(custom_filtering_instructions: Optional[str] = No
                 use_hard_exclusions=True,
                 use_claude_filtering=False
             )
+    except ClaudeFilteringUnavailableError:
+        # Preserve the distinct filter-unavailable signal; main() classifies it.
+        raise
     except Exception as e:
         raise ConfigurationError(f'Failed to initialize findings filter: {str(e)}')
 
@@ -560,6 +564,12 @@ def main():
         # Initialize findings filter
         try:
             findings_filter = initialize_findings_filter(custom_filtering_instructions)
+        except ClaudeFilteringUnavailableError as e:
+            print(json.dumps({
+                'error': f'FALSE_POSITIVE_FILTER_UNAVAILABLE: {str(e)}',
+                'filter_unavailable': True,
+            }))
+            sys.exit(EXIT_CONFIGURATION_ERROR)
         except ConfigurationError as e:
             print(json.dumps({'error': str(e)}))
             sys.exit(EXIT_CONFIGURATION_ERROR)
@@ -609,10 +619,21 @@ def main():
             'description': pr_data.get('body', '')
         }
         
-        # Apply findings filter (including final directory exclusion)
-        kept_findings, excluded_findings, analysis_summary = apply_findings_filter(
-            findings_filter, original_findings, pr_context, github_client
-        )
+        # Apply findings filter (including final directory exclusion).
+        # A configuration-class filter failure FAILS the run: the audit did produce
+        # findings, but they are UNFILTERED, and emitting them as a normal result would
+        # be indistinguishable from a filtered one.
+        try:
+            kept_findings, excluded_findings, analysis_summary = apply_findings_filter(
+                findings_filter, original_findings, pr_context, github_client
+            )
+        except ClaudeFilteringUnavailableError as e:
+            print(json.dumps({
+                'error': f'FALSE_POSITIVE_FILTER_UNAVAILABLE: {str(e)}',
+                'filter_unavailable': True,
+                'unfiltered_findings_count': len(original_findings),
+            }))
+            sys.exit(EXIT_CONFIGURATION_ERROR)
         
         # Prepare output
         output = {

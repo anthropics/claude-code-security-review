@@ -2,6 +2,7 @@
 
 import os
 import json
+import re
 import time
 from typing import Dict, Any, Tuple, Optional
 from pathlib import Path
@@ -16,6 +17,38 @@ from claudecode.json_parser import parse_json_with_fallbacks
 from claudecode.logger import get_logger
 
 logger = get_logger(__name__)
+
+
+# Configuration-class API errors: the false-positive filter cannot run AT ALL as
+# configured (unknown/retired model id, bad or revoked key, key without access to the
+# model). These are never transient — retrying cannot fix them, and continuing without
+# the filter produces output indistinguishable from output the filter actually passed.
+#
+# Deliberately NARROW. Rate limits, overload, timeouts and spend/usage-cap 400s are NOT
+# in this set: they are transient or billing conditions, already handled by the retry
+# path below (and, for callers running this in CI, by their own cap classification).
+_CONFIGURATION_ERROR_PATTERNS = re.compile(
+    r"not_found_error"
+    r"|authentication_error"
+    r"|permission_error"
+    r"|invalid[ _-](x[ _-])?api[ _-]key"
+    r"|error code:\s*(401|403|404)\b",
+    re.IGNORECASE,
+)
+
+
+class ClaudeFilteringUnavailableError(RuntimeError):
+    """Claude-based false-positive filtering cannot run as configured.
+
+    Raised in place of silently degrading to hard-rules-only filtering. Callers are
+    expected to FAIL the run: an UNFILTERED result must never be reported as a
+    filtered one.
+    """
+
+
+def is_configuration_error(error_message: str) -> bool:
+    """True when an API error means filtering can never succeed as configured."""
+    return bool(_CONFIGURATION_ERROR_PATTERNS.search(error_message or ""))
 
 
 class ClaudeAPIClient:
@@ -49,27 +82,6 @@ class ClaudeAPIClient:
         # Initialize Anthropic client
         self.client = Anthropic(api_key=self.api_key)
         logger.info("Claude API client initialized successfully")
-    
-    def validate_api_access(self) -> Tuple[bool, str]:
-        """Validate that API access is working.
-        
-        Returns:
-            Tuple of (success, error_message)
-        """
-        try:
-            # Simple test call to verify API access
-            self.client.messages.create(
-                model="claude-3-5-haiku-20241022",
-                max_tokens=10,
-                messages=[{"role": "user", "content": "Hello"}],
-                timeout=10
-            )
-            logger.info("Claude API access validated successfully")
-            return True, ""
-        except Exception as e:
-            error_msg = str(e)
-            logger.error(f"Claude API validation failed: {error_msg}")
-            return False, f"API validation failed: {error_msg}"
     
     def call_with_retry(self, 
                        prompt: str,
@@ -124,7 +136,16 @@ class ClaudeAPIClient:
                 error_msg = str(e)
                 last_error = error_msg
                 logger.error(f"Claude API call failed: {error_msg}")
-                
+
+                # Fail LOUD and immediately on a configuration-class error. Retrying an
+                # unknown model id only multiplies failed requests, and the old code path
+                # ended in a silently-unfiltered scan either way.
+                if is_configuration_error(error_msg):
+                    raise ClaudeFilteringUnavailableError(
+                        f"Claude false-positive filtering is unavailable with model "
+                        f"'{self.model}': {error_msg}"
+                    ) from e
+
                 # Check if it's a rate limit error
                 if "rate limit" in error_msg.lower() or "429" in error_msg:
                     logger.warning("Rate limit detected, increasing backoff")
@@ -179,6 +200,10 @@ class ClaudeAPIClient:
                 # Fallback: return error
                 return False, {}, "Failed to parse JSON response"
                 
+        except ClaudeFilteringUnavailableError:
+            # Configuration-class failure — must not be flattened into a per-finding
+            # "keep it anyway" result; the whole run has to fail.
+            raise
         except Exception as e:
             logger.exception(f"Error during single finding security analysis: {str(e)}")
             return False, {}, f"Single finding security analysis failed: {str(e)}"

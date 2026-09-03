@@ -29,7 +29,7 @@ inputs:
     default: ''
 
   claude-model:
-    description: 'Claude model to use for security analysis (e.g., claude-sonnet-4-20250514)'
+    description: 'Claude model to use for security analysis (e.g., claude-sonnet-5)'
     required: false
     default: ''
 
@@ -246,6 +246,23 @@ runs:
         else
           echo "ClaudeCode scan completed successfully"
         fi
+
+        # Exit 2 is EXIT_CONFIGURATION_ERROR: the audit could not run AS CONFIGURED —
+        # unreadable environment, or (since the false-positive filter fails loud) a model
+        # the key cannot reach. Exit 1 stays swallowed: that is the auditor's "found a HIGH
+        # severity finding" signal, which is a RESULT, not a failure, and callers gate on
+        # it themselves.
+        #
+        # Without this the step exits 0 and reports findings_count=0 whatever the auditor
+        # said, so "the filter could not run" is indistinguishable from "there was nothing
+        # to report" — the exact defect the filter's own fail-loud change exists to fix,
+        # left in place one layer up. Deferred to the caller, the property only holds for
+        # callers that parse the results JSON themselves.
+        CLAUDECODE_CONFIG_ERROR=0
+        if [ "${CLAUDECODE_EXIT_CODE:-0}" = "2" ]; then
+          CLAUDECODE_CONFIG_ERROR=1
+          echo "::error::ClaudeCode could not run as configured (exit 2). The results file below carries the reason; a FALSE_POSITIVE_FILTER_UNAVAILABLE error means the scan ran but its false-positive filter did not, so any findings are UNFILTERED."
+        fi
         
         # Parse ClaudeCode results and count findings regardless of exit code
         if [ -f claudecode/claudecode-results.json ]; then
@@ -303,8 +320,14 @@ runs:
         fi
         
         echo "::endgroup::"
-    
-    
+
+        # Fail LAST, after the results/findings outputs and the workspace copies above, so
+        # the artifact upload and the PR-comment step still see everything they need.
+        if [ "$CLAUDECODE_CONFIG_ERROR" = "1" ]; then
+          exit 1
+        fi
+
+
     - name: Upload scan results
       if: always() && inputs.upload-results == 'true'
       uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2 pinned to commit hash
