@@ -254,6 +254,101 @@ class TestSimpleClaudeRunner:
         assert mock_run.call_count == 2
     
     @patch('subprocess.run')
+    def test_run_security_audit_prompt_too_long_with_token_counts(self, mock_run):
+        """Test detection of a prompt-too-long result that carries token counts.
+        
+        The API appends its token accounting to the message, so the marker is a
+        prefix of the result rather than the whole of it.
+        """
+        too_long_result = {
+            "type": "result",
+            "subtype": "success",
+            "is_error": True,
+            "result": "Prompt is too long \u00b7 the request is ~1139713 tokens (limit 1000000) but the maximum allowed is 1000000"
+        }
+        
+        mock_run.return_value = Mock(
+            returncode=0,
+            stdout=json.dumps(too_long_result),
+            stderr=''
+        )
+        
+        runner = SimpleClaudeRunner()
+        with patch('pathlib.Path.exists', return_value=True):
+            success, error, results = runner.run_security_audit(
+                Path('/tmp/test'),
+                "test prompt"
+            )
+        
+        assert success is False
+        assert error == "PROMPT_TOO_LONG"
+        assert results == {}
+    
+    @patch('subprocess.run')
+    def test_run_security_audit_prompt_too_long_bare_message(self, mock_run):
+        """Test that the bare prompt-too-long message is still detected."""
+        too_long_result = {
+            "type": "result",
+            "subtype": "success",
+            "is_error": True,
+            "result": "Prompt is too long"
+        }
+        
+        mock_run.return_value = Mock(
+            returncode=0,
+            stdout=json.dumps(too_long_result),
+            stderr=''
+        )
+        
+        runner = SimpleClaudeRunner()
+        with patch('pathlib.Path.exists', return_value=True):
+            success, error, results = runner.run_security_audit(
+                Path('/tmp/test'),
+                "test prompt"
+            )
+        
+        assert success is False
+        assert error == "PROMPT_TOO_LONG"
+        assert results == {}
+    
+    @patch('subprocess.run')
+    def test_run_security_audit_other_errors_are_not_prompt_too_long(self, mock_run):
+        """Test that unrelated error results do not trigger the no-diff retry.
+        
+        The last case contains the phrase but does not begin with it, which is
+        why the check matches a prefix rather than a substring.
+        """
+        unrelated_errors = [
+            "Rate limit exceeded",
+            "Invalid API key",
+            "overloaded_error",
+            "The output prompt is too long to display",
+        ]
+        
+        for message in unrelated_errors:
+            error_result = {
+                "type": "result",
+                "subtype": "success",
+                "is_error": True,
+                "result": message
+            }
+            
+            mock_run.return_value = Mock(
+                returncode=0,
+                stdout=json.dumps(error_result),
+                stderr=''
+            )
+            
+            runner = SimpleClaudeRunner()
+            with patch('pathlib.Path.exists', return_value=True):
+                success, error, results = runner.run_security_audit(
+                    Path('/tmp/test'),
+                    "test prompt"
+                )
+            
+            assert error != "PROMPT_TOO_LONG", f"unexpected match for: {message}"
+    
+    @patch('subprocess.run')
     def test_run_security_audit_timeout(self, mock_run):
         """Test timeout handling."""
         mock_run.side_effect = subprocess.TimeoutExpired(['claude'], 1200)

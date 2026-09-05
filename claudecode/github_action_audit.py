@@ -260,7 +260,7 @@ class SimpleClaudeRunner:
                         parsed_result.get('type') == 'result' and 
                         parsed_result.get('subtype') == 'success' and
                         parsed_result.get('is_error') and
-                        parsed_result.get('result') == 'Prompt is too long'):
+                        str(parsed_result.get('result', '')).startswith('Prompt is too long')):
                         return False, "PROMPT_TOO_LONG", {}
                     
                     # Check for error_during_execution that should trigger retry
