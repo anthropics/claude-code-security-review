@@ -64,8 +64,16 @@ runs:
       shell: bash
       run: |
         echo "::group::Install gh CLI"
-        # Install GitHub CLI for PR operations
-        sudo apt-get update && sudo apt-get install -y gh
+        # gh ships preinstalled on GitHub-hosted runners, so only reach for apt
+        # when it is genuinely missing. apt-get update against the Azure archive
+        # mirror can stall for the length of the job, and this is the first step
+        # in the action, so the scan never starts when it does.
+        if command -v gh >/dev/null 2>&1; then
+          echo "gh already present: $(gh --version | head -n 1)"
+        else
+          echo "gh not found, installing from apt"
+          sudo apt-get update && sudo apt-get install -y gh
+        fi
         echo "::endgroup::"
     
     - name: Set up Python
