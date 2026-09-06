@@ -186,6 +186,27 @@ class GitHubActionClient:
         return ''.join(filtered_sections)
 
 
+def _timeout_minutes_from_env() -> Optional[int]:
+    """Read the analysis timeout the action passes in CLAUDE_TIMEOUT.
+
+    The action exposes a ``claudecode-timeout`` input in minutes and exports it
+    as ``CLAUDE_TIMEOUT``. Returns None when it is unset or unusable, which
+    leaves the runner on its built-in default.
+    """
+    raw = os.environ.get('CLAUDE_TIMEOUT', '').strip()
+    if not raw:
+        return None
+    try:
+        minutes = int(raw)
+    except ValueError:
+        logger.warning(f'Ignoring non-numeric CLAUDE_TIMEOUT={raw!r}')
+        return None
+    if minutes <= 0:
+        logger.warning(f'Ignoring non-positive CLAUDE_TIMEOUT={raw!r}')
+        return None
+    return minutes
+
+
 class SimpleClaudeRunner:
     """Simplified Claude Code runner for GitHub Actions."""
     
@@ -228,16 +249,23 @@ class SimpleClaudeRunner:
                 '--disallowed-tools', 'Bash(ps:*)'
             ]
             
-            # Run Claude Code with retry logic
+            # Run Claude Code with retry logic. The timeout is a budget for the
+            # whole audit rather than for each attempt: with a per-attempt
+            # timeout three stalled attempts run for three times the configured
+            # limit, which is how a 20 minute default produced a 27 minute run.
             NUM_RETRIES = 3
+            deadline = time.monotonic() + self.timeout_seconds
             for attempt in range(NUM_RETRIES):
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise subprocess.TimeoutExpired(cmd, self.timeout_seconds)
                 result = subprocess.run(
                     cmd,
                     input=prompt,  # Pass prompt via stdin
                     cwd=repo_dir,
                     capture_output=True,
                     text=True,
-                    timeout=self.timeout_seconds
+                    timeout=remaining
                 )
                 
                 if result.returncode != 0:
@@ -387,7 +415,7 @@ def initialize_clients() -> Tuple[GitHubActionClient, SimpleClaudeRunner]:
         raise ConfigurationError(f'Failed to initialize GitHub client: {str(e)}')
     
     try:
-        claude_runner = SimpleClaudeRunner()
+        claude_runner = SimpleClaudeRunner(timeout_minutes=_timeout_minutes_from_env())
     except Exception as e:
         raise ConfigurationError(f'Failed to initialize Claude runner: {str(e)}')
         

@@ -20,3 +20,4 @@ env/
 # Debug files
 claudecode/claudecode-prompt.txt
 eval_results/
+.venv/

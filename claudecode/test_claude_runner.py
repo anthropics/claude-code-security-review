@@ -6,10 +6,18 @@ Unit tests for SimpleClaudeRunner.
 import json
 import os
 import subprocess
+import tempfile
+import time
 from unittest.mock import Mock, patch
 from pathlib import Path
 
-from claudecode.github_action_audit import SimpleClaudeRunner
+import pytest
+
+from claudecode.github_action_audit import (
+    SimpleClaudeRunner,
+    _timeout_minutes_from_env,
+    initialize_clients,
+)
 from claudecode.constants import DEFAULT_CLAUDE_MODEL
 
 
@@ -437,3 +445,51 @@ class TestClaudeRunnerEdgeCases:
         assert success is False
         assert 'Unexpected error' in error
         assert results == {}
+
+
+class TestTimeoutBudget:
+    """gh-124: the claudecode-timeout input must actually bound the analysis."""
+
+    def test_timeout_minutes_read_from_env(self, monkeypatch):
+        monkeypatch.setenv('CLAUDE_TIMEOUT', '10')
+        assert _timeout_minutes_from_env() == 10
+
+    def test_timeout_env_unset_falls_back(self, monkeypatch):
+        monkeypatch.delenv('CLAUDE_TIMEOUT', raising=False)
+        assert _timeout_minutes_from_env() is None
+
+    @pytest.mark.parametrize('bad', ['', '   ', 'abc', '0', '-5'])
+    def test_timeout_env_rejects_unusable_values(self, monkeypatch, bad):
+        monkeypatch.setenv('CLAUDE_TIMEOUT', bad)
+        assert _timeout_minutes_from_env() is None
+
+    def test_runner_built_from_env_timeout(self, monkeypatch):
+        monkeypatch.setenv('CLAUDE_TIMEOUT', '10')
+        monkeypatch.setenv('GITHUB_TOKEN', 'x')
+        monkeypatch.setenv('GITHUB_REPOSITORY', 'o/r')
+        _, runner = initialize_clients()
+        assert runner.timeout_seconds == 600
+
+    def test_retries_share_one_timeout_budget(self, monkeypatch):
+        """Three attempts must draw down one budget, not get the full one each."""
+        runner = SimpleClaudeRunner(timeout_minutes=1)   # 60s budget
+        seen = []
+        clock = [0.0]
+
+        def fake_run(cmd, **kwargs):
+            seen.append(kwargs['timeout'])
+            clock[0] += 25          # each attempt burns 25s, then fails
+            return Mock(returncode=1, stdout='', stderr='boom')
+
+        monkeypatch.setattr(time, 'monotonic', lambda: clock[0])
+        monkeypatch.setattr(subprocess, 'run', fake_run)
+
+        with tempfile.TemporaryDirectory() as d:
+            runner.run_security_audit(Path(d), 'prompt')
+
+        # First attempt gets the whole budget, later attempts only what is left.
+        assert seen[0] == pytest.approx(60, abs=1)
+        assert seen[1] == pytest.approx(35, abs=1)
+        assert all(t <= 60 for t in seen)
+        # The attempts must never sum to more than one budget's worth of wall time.
+        assert clock[0] <= 60 + 25
