@@ -171,6 +171,13 @@ runs:
           npm install -g @anthropic-ai/claude-code
         fi
         sudo apt-get update && sudo apt-get install -y jq
+        # The results parsing below is entirely jq based, and a missing jq there
+        # reads as "no findings" rather than as a failure. Fail here instead,
+        # where the cause is still obvious.
+        if ! command -v jq >/dev/null 2>&1; then
+          echo "::error::jq is required to parse scan results but is not available after installation"
+          exit 1
+        fi
         echo "::endgroup::"
     
     - name: Run ClaudeCode scan
@@ -271,14 +278,25 @@ runs:
               echo "::warning::ClaudeCode error: $ERROR_MSG"
               echo "findings_count=0" >> $GITHUB_OUTPUT
             else
-              # Use -r to get raw output and handle potential null/missing findings array
-              CLAUDECODE_FINDINGS_COUNT=$(jq -r '.findings | if . == null then 0 else length end' claudecode/claudecode-results.json 2>/dev/null || echo "0")
+              # Use -r to get raw output and handle potential null/missing findings array.
+              # A jq failure here means the results could not be read, which is not the
+              # same thing as a clean scan, so do not fall back to a count of zero: that
+              # turns an unreadable result file into a green check.
+              if ! CLAUDECODE_FINDINGS_COUNT=$(jq -r '.findings | if . == null then 0 else length end' claudecode/claudecode-results.json); then
+                echo "::error::Could not read findings from claudecode/claudecode-results.json"
+                echo "Results file contents:"
+                cat claudecode/claudecode-results.json
+                exit 1
+              fi
               echo "::debug::Extracted ClaudeCode findings count: $CLAUDECODE_FINDINGS_COUNT"
               echo "findings_count=$CLAUDECODE_FINDINGS_COUNT" >> $GITHUB_OUTPUT
               echo "ClaudeCode found $CLAUDECODE_FINDINGS_COUNT security issues"
               
               # Also create findings.json for PR comment script
-              jq '.findings // []' claudecode/claudecode-results.json > findings.json || echo '[]' > findings.json
+              if ! jq '.findings // []' claudecode/claudecode-results.json > findings.json; then
+                echo "::error::Could not extract findings array from claudecode/claudecode-results.json"
+                exit 1
+              fi
             fi
           fi
         else
