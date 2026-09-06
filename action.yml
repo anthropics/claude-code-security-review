@@ -89,6 +89,7 @@ runs:
       env:
         PR_NUMBER: ${{ github.event.pull_request.number }}
         RUN_EVERY_COMMIT: ${{ inputs.run-every-commit }}
+        SHA: ${{ github.sha }}
       run: |
         # Check if ClaudeCode should be enabled
         ENABLE_CLAUDECODE="true"
@@ -99,15 +100,28 @@ runs:
           PR_NUMBER="$PR_NUMBER"
           CACHE_HIT="${{ steps.claudecode-history.outputs.cache-hit }}"
 
+          # The cache key is scoped per commit, but restore-keys is a SHA-less
+          # prefix of it, so a brand new commit with no exact entry still
+          # restores the marker written by an earlier commit on the same PR.
+          # The marker records the commit it was written for, so compare it:
+          # only a marker for *this* commit means this commit has been claimed.
+          MARKER_SHA=""
+          if [ -f ".claudecode-marker/marker.json" ]; then
+            MARKER_SHA=$(python -c 'import json,sys; print(json.load(open(".claudecode-marker/marker.json")).get("sha",""))' 2>/dev/null || echo "")
+            if [ -n "$MARKER_SHA" ] && [ "$MARKER_SHA" != "$SHA" ]; then
+              echo "Ignoring marker restored from commit $MARKER_SHA; this run is for $SHA"
+              rm -rf .claudecode-marker
+            fi
+          fi
+
           # Now check cache - if ClaudeCode has already run, disable unless run-every-commit is true
-          # Check if marker file exists (cache may have been restored from a different SHA)
           if [ "$RUN_EVERY_COMMIT" != "true" ] && [ -f ".claudecode-marker/marker.json" ]; then
-            echo "ClaudeCode has already run on PR #$PR_NUMBER (found marker file), forcing disable to avoid false positives"
+            echo "ClaudeCode has already run on PR #$PR_NUMBER for commit $SHA (found marker file), forcing disable to avoid false positives"
             ENABLE_CLAUDECODE="false"
           elif [ "$RUN_EVERY_COMMIT" == "true" ] && [ -f ".claudecode-marker/marker.json" ]; then
             echo "ClaudeCode has already run on PR #$PR_NUMBER but run-every-commit is enabled, running again"
           elif [ "$ENABLE_CLAUDECODE" == "true" ]; then
-            echo "ClaudeCode will run for PR #$PR_NUMBER (first run)"
+            echo "ClaudeCode will run for PR #$PR_NUMBER (commit $SHA)"
           fi
         fi
         
