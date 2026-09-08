@@ -10,6 +10,7 @@ import json
 import subprocess
 import requests
 from typing import Dict, Any, List, Tuple, Optional
+from collections.abc import Mapping
 from pathlib import Path
 import re
 import time 
@@ -57,6 +58,9 @@ class GitHubActionClient:
         self.excluded_dirs = [d.strip() for d in exclude_dirs.split(',') if d.strip()] if exclude_dirs else []
         if self.excluded_dirs:
             print(f"[Debug] Excluded directories: {self.excluded_dirs}", file=sys.stderr)
+
+        # Set by get_pr_diff: where the diff came from and which files it lacks
+        self.diff_summary: Optional[Dict[str, Any]] = None
     
     def get_pr_data(self, repo_name: str, pr_number: int) -> Dict[str, Any]:
         """Get PR metadata and files from GitHub API.
@@ -74,12 +78,9 @@ class GitHubActionClient:
         response.raise_for_status()
         pr_data = response.json()
         
-        # Get PR files with pagination support
-        files_url = f"https://api.github.com/repos/{repo_name}/pulls/{pr_number}/files?per_page=100"
-        response = requests.get(files_url, headers=self.headers)
-        response.raise_for_status()
-        files_data = response.json()
-        
+        # Get PR files, paging through every page rather than the first 100
+        files_data = self._list_pr_files(repo_name, pr_number)
+
         return {
             'number': pr_data['number'],
             'title': pr_data['title'],
@@ -129,12 +130,109 @@ class GitHubActionClient:
         url = f"https://api.github.com/repos/{repo_name}/pulls/{pr_number}"
         headers = dict(self.headers)
         headers['Accept'] = 'application/vnd.github.diff'
-        
+
         response = requests.get(url, headers=headers)
-        response.raise_for_status()
-        
-        return self._filter_generated_files(response.text)
-    
+
+        # GitHub refuses to render a diff of more than 300 files or 20,000
+        # lines and answers 406 Not Acceptable. The files endpoint still
+        # serves each file's patch, so rebuild the unified diff from those.
+        if response.status_code == 406:
+            print(f"[Info] GitHub refused to render the diff of PR #{pr_number} "
+                  f"(406: more than 300 files or 20,000 lines). "
+                  f"Rebuilding it from the files endpoint.", file=sys.stderr)
+            diff_text = self._build_diff_from_files(repo_name, pr_number)
+        else:
+            response.raise_for_status()
+            diff_text = response.text
+            self.diff_summary = {
+                'source': 'pull-request-diff',
+                'files_without_patch': []
+            }
+
+        return self._filter_generated_files(diff_text)
+
+    def _list_pr_files(self, repo_name: str, pr_number: int) -> List[Dict[str, Any]]:
+        """List every file on the PR, following the files endpoint's pages.
+
+        GitHub names the next page in the Link header and leaves it out on
+        the last page, so the header decides when to stop.
+
+        Args:
+            repo_name: Repository name in format "owner/repo"
+            pr_number: Pull request number
+
+        Returns:
+            The file entries GitHub returns, in order, across every page
+        """
+        files_url: Optional[str] = f"https://api.github.com/repos/{repo_name}/pulls/{pr_number}/files?per_page=100"
+        files_data: List[Dict[str, Any]] = []
+        while files_url:
+            response = requests.get(files_url, headers=self.headers)
+            response.raise_for_status()
+            files_data.extend(response.json())
+            files_url = self._next_page_url(response)
+        return files_data
+
+    @staticmethod
+    def _next_page_url(response: Any) -> Optional[str]:
+        """Return the rel="next" URL from a response's Link header, if any."""
+        headers = getattr(response, 'headers', None)
+        if not isinstance(headers, Mapping):
+            return None
+        link = headers.get('Link') or ''
+        match = re.search(r'<([^>]+)>;\s*rel="next"', link)
+        return match.group(1) if match else None
+
+    def _build_diff_from_files(self, repo_name: str, pr_number: int) -> str:
+        """Rebuild a unified diff from the patch field of each file on the PR.
+
+        GitHub omits the patch for binary files and for files whose diff is
+        too large. Those files are left out of the diff and named in
+        self.diff_summary so the results say what the scan did not see.
+
+        Args:
+            repo_name: Repository name in format "owner/repo"
+            pr_number: Pull request number
+
+        Returns:
+            A unified diff covering every file that carries a patch
+        """
+        files_without_patch: List[str] = []
+        sections: List[str] = []
+
+        for entry in self._list_pr_files(repo_name, pr_number):
+            filename = entry['filename']
+            patch = entry.get('patch')
+            if not patch:
+                files_without_patch.append(filename)
+                continue
+
+            status = entry.get('status', 'modified')
+            previous = entry.get('previous_filename') or filename
+            old_path = '/dev/null' if status == 'added' else f"a/{previous}"
+            new_path = '/dev/null' if status == 'removed' else f"b/{filename}"
+
+            section = f"diff --git a/{previous} b/{filename}\n"
+            if previous != filename:
+                section += f"rename from {previous}\nrename to {filename}\n"
+            section += f"--- {old_path}\n+++ {new_path}\n{patch}"
+            if not section.endswith('\n'):
+                section += '\n'
+            sections.append(section)
+
+        if files_without_patch:
+            print(f"[Info] {len(files_without_patch)} file(s) carry no patch on the files endpoint "
+                  f"(binary or too large) and are left out of the diff: "
+                  f"{', '.join(files_without_patch[:20])}"
+                  f"{', ...' if len(files_without_patch) > 20 else ''}", file=sys.stderr)
+
+        self.diff_summary = {
+            'source': 'files-endpoint',
+            'files_without_patch': files_without_patch
+        }
+
+        return ''.join(sections)
+
     def _is_excluded(self, filepath: str) -> bool:
         """Check if a file should be excluded based on directory patterns."""
         for excluded_dir in self.excluded_dirs:
@@ -628,6 +726,12 @@ def main():
                 'excluded_findings_details': excluded_findings  # Include full details of what was filtered
             }
         }
+
+        # Say where the diff came from and which files it lacks, so a scan
+        # rebuilt from the files endpoint is not mistaken for a full one
+        diff_summary = getattr(github_client, 'diff_summary', None)
+        if isinstance(diff_summary, dict):
+            output['diff_summary'] = diff_summary
         
         # Output JSON to stdout
         print(json.dumps(output, indent=2))

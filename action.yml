@@ -197,6 +197,13 @@ runs:
         echo "findings_count=0" >> $GITHUB_OUTPUT
         echo "results_file=claudecode/claudecode-results.json" >> $GITHUB_OUTPUT
         
+        # Set when the scan itself could not run (no results, or results
+        # carrying an error). The step fails at its end on that, after the
+        # files are copied out for the artifact, so a scan that did not
+        # happen is red rather than green. A scan that ran and found
+        # something still passes, as before.
+        SCAN_FAILED="false"
+        
         # Skip ClaudeCode if not a PR
         if [ "${{ github.event_name }}" != "pull_request" ]; then
           echo "ClaudeCode only runs on pull requests, skipping"
@@ -256,6 +263,7 @@ runs:
           if [ "$FILE_SIZE" -lt 2 ]; then
             echo "::warning::ClaudeCode results file is empty or invalid (size: $FILE_SIZE bytes)"
             echo "::warning::ClaudeCode may have failed silently. Check claudecode-error.log"
+            SCAN_FAILED="true"
             if [ -f claudecode/claudecode-error.log ]; then
               echo "Error log contents:"
               cat claudecode/claudecode-error.log
@@ -270,6 +278,7 @@ runs:
               ERROR_MSG=$(jq -r '.error' claudecode/claudecode-results.json)
               echo "::warning::ClaudeCode error: $ERROR_MSG"
               echo "findings_count=0" >> $GITHUB_OUTPUT
+              SCAN_FAILED="true"
             else
               # Use -r to get raw output and handle potential null/missing findings array
               CLAUDECODE_FINDINGS_COUNT=$(jq -r '.findings | if . == null then 0 else length end' claudecode/claudecode-results.json 2>/dev/null || echo "0")
@@ -288,6 +297,7 @@ runs:
             cat claudecode/claudecode-error.log
           fi
           echo "findings_count=0" >> $GITHUB_OUTPUT
+          SCAN_FAILED="true"
         fi
         
         # Always copy files to workspace root regardless of the outcome
@@ -303,6 +313,11 @@ runs:
         fi
         
         echo "::endgroup::"
+        
+        if [ "$SCAN_FAILED" == "true" ]; then
+          echo "::error::The security scan did not run. See the warnings above and the security-review-results artifact."
+          exit 1
+        fi
     
     
     - name: Upload scan results

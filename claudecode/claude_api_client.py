@@ -57,14 +57,16 @@ class ClaudeAPIClient:
             Tuple of (success, error_message)
         """
         try:
-            # Simple test call to verify API access
+            # Simple test call to verify API access, on the model the filter
+            # will use. A fixed model name here retires with that model and
+            # takes the filter down with it.
             self.client.messages.create(
-                model="claude-3-5-haiku-20241022",
+                model=self.model,
                 max_tokens=10,
                 messages=[{"role": "user", "content": "Hello"}],
                 timeout=10
             )
-            logger.info("Claude API access validated successfully")
+            logger.info(f"Claude API access validated successfully with model {self.model}")
             return True, ""
         except Exception as e:
             error_msg = str(e)
