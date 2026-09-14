@@ -138,12 +138,16 @@ class GitHubActionClient:
     def _is_excluded(self, filepath: str) -> bool:
         """Check if a file should be excluded based on directory patterns."""
         for excluded_dir in self.excluded_dirs:
+            excluded_dir = excluded_dir.rstrip('/')
             # Normalize excluded directory (remove leading ./ if present)
             if excluded_dir.startswith('./'):
                 normalized_excluded = excluded_dir[2:]
             else:
                 normalized_excluded = excluded_dir
             
+            if normalized_excluded in ('', '.'):
+                continue
+
             # Check if file starts with excluded directory
             if filepath.startswith(excluded_dir + '/'):
                 return True

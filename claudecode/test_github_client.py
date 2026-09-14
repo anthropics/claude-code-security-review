@@ -337,3 +337,17 @@ class TestGitHubAPIIntegration:
         assert len(result['files']) == 100
         assert result['files'][0]['filename'] == 'file0.py'
         assert result['files'][99]['filename'] == 'file99.py'
+
+
+@pytest.mark.parametrize("pattern", ["vendor", "vendor/", "vendor///", "./vendor/"])
+@pytest.mark.parametrize("path,excluded", [("vendor/a.py", True), ("src/vendor/a.py", True), ("vendorized/a.py", False), ("src/vendor.py", False)])
+def test_excluded_directory_trailing_slashes(pattern, path, excluded):
+    client = object.__new__(GitHubActionClient)
+    client.excluded_dirs = [pattern]
+    assert client._is_excluded(path) is excluded
+
+@pytest.mark.parametrize("pattern", ["", "/", "./"])
+def test_empty_directory_patterns_do_not_exclude_files(pattern):
+    client = object.__new__(GitHubActionClient)
+    client.excluded_dirs = [pattern]
+    assert not client._is_excluded("src/file.py")
