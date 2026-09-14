@@ -214,6 +214,26 @@ class TestSimpleClaudeRunner:
         assert success is True
         assert error == ''
         assert mock_run.call_count == 2  # Retried once
+
+    @patch('time.sleep')
+    @patch('time.monotonic', side_effect=[0, 0, 61])
+    @patch('subprocess.run')
+    def test_run_security_audit_timeout_covers_retries(self, mock_run, _monotonic, mock_sleep):
+        """The configured timeout is shared by all retry attempts."""
+        mock_run.return_value = Mock(returncode=1, stdout='', stderr='Temporary error')
+
+        runner = SimpleClaudeRunner(timeout_minutes=1)
+        with patch('pathlib.Path.exists', return_value=True):
+            success, error, results = runner.run_security_audit(
+                Path('/tmp/test'),
+                "test prompt"
+            )
+
+        assert success is False
+        assert 'timed out after 1 minutes' in error
+        assert results == {}
+        assert mock_run.call_count == 1
+        mock_sleep.assert_not_called()
     
     @patch('subprocess.run')
     def test_run_security_audit_retry_on_error_during_execution(self, mock_run):
