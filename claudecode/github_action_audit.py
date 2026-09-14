@@ -228,16 +228,23 @@ class SimpleClaudeRunner:
                 '--disallowed-tools', 'Bash(ps:*)'
             ]
             
-            # Run Claude Code with retry logic
+            # Run Claude Code with retry logic. The configured timeout is a
+            # deadline for the complete audit, including retries, rather than
+            # a fresh budget for each subprocess invocation.
             NUM_RETRIES = 3
+            deadline = time.monotonic() + self.timeout_seconds
             for attempt in range(NUM_RETRIES):
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    return False, f"Claude Code execution timed out after {self.timeout_seconds // 60} minutes", {}
+
                 result = subprocess.run(
                     cmd,
                     input=prompt,  # Pass prompt via stdin
                     cwd=repo_dir,
                     capture_output=True,
                     text=True,
-                    timeout=self.timeout_seconds
+                    timeout=remaining
                 )
                 
                 if result.returncode != 0:
@@ -247,7 +254,10 @@ class SimpleClaudeRunner:
                         error_details += f"Stdout: {result.stdout[:500]}..."  # First 500 chars
                         return False, error_details, {}
                     else:
-                        time.sleep(5*attempt)
+                        remaining = deadline - time.monotonic()
+                        if remaining <= 0:
+                            return False, f"Claude Code execution timed out after {self.timeout_seconds // 60} minutes", {}
+                        time.sleep(min(5 * attempt, remaining))
                         # Note: We don't do exponential backoff here to keep the runtime reasonable
                         continue  # Retry
                 
