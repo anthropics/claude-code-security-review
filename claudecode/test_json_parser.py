@@ -237,3 +237,20 @@ class TestJsonParser:
         
         # Should be able to extract the JSON
         assert result == {"nested": "json"}
+
+class TestEmbeddedJsonRegressions:
+    def test_braces_and_escapes_inside_strings(self):
+        for value in ['{', '}', 'a { b', 'quote " and slash \\ with }']:
+            expected = {"findings": [{"description": value}]}
+            text = "Results: " + json.dumps(expected) + " End."
+            assert extract_json_from_text(text) == expected
+            assert parse_json_with_fallbacks(text) == (True, expected)
+
+    def test_stray_braces_in_prose(self):
+        for prefix in ["Closing brace } then: ", "Stray }} before: "]:
+            assert extract_json_from_text(prefix + '{"findings": []}') == {"findings": []}
+
+    def test_empty_fenced_results_are_successful(self):
+        for expected in [{}, [], False, 0]:
+            text = "Result:\n```json\n" + json.dumps(expected) + "\n```"
+            assert parse_json_with_fallbacks(text) == (True, expected)
