@@ -36,7 +36,7 @@ class ClaudeAPIClient:
         """
         self.model = model or DEFAULT_CLAUDE_MODEL
         self.timeout_seconds = timeout_seconds or DEFAULT_TIMEOUT_SECONDS
-        self.max_retries = max_retries or DEFAULT_MAX_RETRIES
+        self.max_retries = DEFAULT_MAX_RETRIES if max_retries is None else max_retries
         
         # Get API key from environment or parameter
         self.api_key = api_key or os.environ.get("ANTHROPIC_API_KEY")
