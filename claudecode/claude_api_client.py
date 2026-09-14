@@ -59,7 +59,10 @@ class ClaudeAPIClient:
         try:
             # Simple test call to verify API access
             self.client.messages.create(
-                model="claude-3-5-haiku-20241022",
+                # Keep the health check aligned with the model used for the
+                # actual filtering calls. Retired or unavailable hard-coded
+                # model IDs would otherwise disable filtering silently.
+                model=self.model,
                 max_tokens=10,
                 messages=[{"role": "user", "content": "Hello"}],
                 timeout=10
@@ -372,5 +375,4 @@ def get_claude_api_client(model: str = DEFAULT_CLAUDE_MODEL,
         api_key=api_key,
         timeout_seconds=timeout_seconds
     )
-
 
