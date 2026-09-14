@@ -171,6 +171,10 @@ runs:
           npm install -g @anthropic-ai/claude-code
         fi
         sudo apt-get update && sudo apt-get install -y jq
+        if ! command -v jq > /dev/null 2>&1; then
+          echo "::error::jq is required to parse ClaudeCode results but is not available on this runner"
+          exit 1
+        fi
         echo "::endgroup::"
     
     - name: Run ClaudeCode scan
@@ -272,13 +276,19 @@ runs:
               echo "findings_count=0" >> $GITHUB_OUTPUT
             else
               # Use -r to get raw output and handle potential null/missing findings array
-              CLAUDECODE_FINDINGS_COUNT=$(jq -r '.findings | if . == null then 0 else length end' claudecode/claudecode-results.json 2>/dev/null || echo "0")
+              if ! CLAUDECODE_FINDINGS_COUNT=$(jq -r '.findings | if . == null then 0 else length end' claudecode/claudecode-results.json); then
+                echo "::error::Unable to parse findings from claudecode-results.json"
+                exit 1
+              fi
               echo "::debug::Extracted ClaudeCode findings count: $CLAUDECODE_FINDINGS_COUNT"
               echo "findings_count=$CLAUDECODE_FINDINGS_COUNT" >> $GITHUB_OUTPUT
               echo "ClaudeCode found $CLAUDECODE_FINDINGS_COUNT security issues"
               
               # Also create findings.json for PR comment script
-              jq '.findings // []' claudecode/claudecode-results.json > findings.json || echo '[]' > findings.json
+              if ! jq '.findings // []' claudecode/claudecode-results.json > findings.json; then
+                echo "::error::Unable to create findings.json from claudecode-results.json"
+                exit 1
+              fi
             fi
           fi
         else
