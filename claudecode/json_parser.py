@@ -33,24 +33,32 @@ def extract_json_from_text(text):
                 except json.JSONDecodeError:
                     continue
         
-        # If no JSON found in code blocks, try to find JSON objects anywhere in the text
-        # Find all potential JSON objects (looking for balanced braces)
+        # Track structural braces without counting braces inside JSON strings.
         brace_count = 0
         json_start = -1
+        in_string = False
+        escaped = False
         for i, char in enumerate(text):
-            if char == '{':
+            if in_string:
+                if escaped:
+                    escaped = False
+                elif char == "\\":
+                    escaped = True
+                elif char == '"':
+                    in_string = False
+                continue
+            if char == '"' and brace_count:
+                in_string = True
+            elif char == '{':
                 if brace_count == 0:
                     json_start = i
                 brace_count += 1
-            elif char == '}':
+            elif char == '}' and brace_count:
                 brace_count -= 1
-                if brace_count == 0 and json_start != -1:
-                    # Found a complete JSON object
-                    potential_json = text[json_start:i+1]
+                if brace_count == 0:
                     try:
-                        return json.loads(potential_json)
+                        return json.loads(text[json_start:i+1])
                     except json.JSONDecodeError:
-                        # This wasn't valid JSON, continue looking
                         continue
     except Exception:
         pass
@@ -77,7 +85,7 @@ def parse_json_with_fallbacks(text, error_context=""):
     
     # Try extracting JSON from text
     extracted_json = extract_json_from_text(text)
-    if extracted_json:
+    if extracted_json is not None:
         return True, extracted_json
     
     # If all parsing failed, return error info
