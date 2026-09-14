@@ -64,8 +64,13 @@ runs:
       shell: bash
       run: |
         echo "::group::Install gh CLI"
-        # Install GitHub CLI for PR operations
-        sudo apt-get update && sudo apt-get install -y gh
+        # GitHub-hosted runners already include gh. Avoid an apt repository
+        # update here: a transient mirror stall can block the whole scan.
+        if ! command -v gh > /dev/null 2>&1; then
+          echo "::error::GitHub CLI (gh) is required but is not installed on this runner"
+          exit 1
+        fi
+        gh --version | head -n 1
         echo "::endgroup::"
     
     - name: Set up Python
