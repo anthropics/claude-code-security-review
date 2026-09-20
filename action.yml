@@ -170,7 +170,17 @@ runs:
           pip install -r "$ACTION_PATH/claudecode/requirements.txt"
           npm install -g @anthropic-ai/claude-code
         fi
-        sudo apt-get update && sudo apt-get install -y jq
+        if ! command -v jq >/dev/null 2>&1; then
+          if command -v sudo >/dev/null 2>&1; then
+            sudo apt-get update && sudo apt-get install -y jq || true
+          elif command -v apt-get >/dev/null 2>&1; then
+            apt-get update && apt-get install -y jq || true
+          fi
+        fi
+        if ! command -v jq >/dev/null 2>&1; then
+          echo "::error::jq is required but could not be installed or found in PATH."
+          exit 1
+        fi
         echo "::endgroup::"
     
     - name: Run ClaudeCode scan
@@ -265,6 +275,22 @@ runs:
             echo "ClaudeCode results preview:"
             head -n 300 claudecode/claudecode-results.json || echo "Unable to preview results"
                         
+            # Verify jq is available to parse results
+            if ! command -v jq > /dev/null 2>&1; then
+              echo "::error::jq is required to parse ClaudeCode results but was not found in PATH."
+              exit 1
+            fi
+
+            # Verify results file is valid JSON
+            if ! jq empty claudecode/claudecode-results.json > /dev/null 2>&1; then
+              echo "::error::ClaudeCode results file is not valid JSON."
+              if [ -f claudecode/claudecode-error.log ]; then
+                echo "Error log contents:"
+                cat claudecode/claudecode-error.log
+              fi
+              exit 1
+            fi
+
             # Check if the result is an error
             if jq -e '.error' claudecode/claudecode-results.json > /dev/null 2>&1; then
               ERROR_MSG=$(jq -r '.error' claudecode/claudecode-results.json)
@@ -272,13 +298,19 @@ runs:
               echo "findings_count=0" >> $GITHUB_OUTPUT
             else
               # Use -r to get raw output and handle potential null/missing findings array
-              CLAUDECODE_FINDINGS_COUNT=$(jq -r '.findings | if . == null then 0 else length end' claudecode/claudecode-results.json 2>/dev/null || echo "0")
+              if ! CLAUDECODE_FINDINGS_COUNT=$(jq -r '.findings | if . == null then 0 else length end' claudecode/claudecode-results.json); then
+                echo "::error::Failed to parse findings count from ClaudeCode results."
+                exit 1
+              fi
               echo "::debug::Extracted ClaudeCode findings count: $CLAUDECODE_FINDINGS_COUNT"
               echo "findings_count=$CLAUDECODE_FINDINGS_COUNT" >> $GITHUB_OUTPUT
               echo "ClaudeCode found $CLAUDECODE_FINDINGS_COUNT security issues"
               
               # Also create findings.json for PR comment script
-              jq '.findings // []' claudecode/claudecode-results.json > findings.json || echo '[]' > findings.json
+              if ! jq '.findings // []' claudecode/claudecode-results.json > findings.json; then
+                echo "::error::Failed to extract findings array to findings.json."
+                exit 1
+              fi
             fi
           fi
         else
