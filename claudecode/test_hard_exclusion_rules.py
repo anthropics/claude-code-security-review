@@ -396,6 +396,50 @@ class TestHardExclusionRules:
             reason = HardExclusionRules.get_exclusion_reason(finding)
             assert reason is None  # Should NOT be excluded
     
+    def test_memory_safety_not_excluded_alternate_cpp_extensions(self):
+        """Test that memory safety issues are NOT excluded in other C-family files."""
+        cpp_memory_findings = [
+            {
+                "title": "Use after free",
+                "description": "Use after free in destructor",
+                "file": "include/object.hpp"
+            },
+            {
+                "title": "Out of bounds write",
+                "description": "Array index out of bounds",
+                "file": "src/parser.hxx"
+            },
+            {
+                "title": "Buffer overflow",
+                "description": "Stack buffer overflow in strcpy",
+                "file": "src/engine.cxx"
+            },
+            {
+                "title": "Memory corruption",
+                "description": "Heap overflow while copying the payload",
+                "file": "src/detail.hh"
+            },
+            {
+                "title": "Out of bounds access",
+                "description": "Out of bounds write in template implementation",
+                "file": "src/vector.ipp"
+            },
+            {
+                "title": "Out of bounds read",
+                "description": "Out of bounds read in the CUDA kernel",
+                "file": "kernels/reduce.cu"
+            },
+            {
+                "title": "Use after free",
+                "description": "Use after free on a released object",
+                "file": "ui/view.mm"
+            }
+        ]
+        
+        for finding in cpp_memory_findings:
+            reason = HardExclusionRules.get_exclusion_reason(finding)
+            assert reason is None  # Should NOT be excluded
+    
     def test_memory_safety_exclusion_case_insensitive(self):
         """Test that file extension checking is case insensitive."""
         findings = [

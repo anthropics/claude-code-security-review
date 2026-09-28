@@ -131,7 +131,14 @@ class HardExclusionRules:
                 return "Regex injection finding (not applicable)"
         
         # Check memory safety patterns - exclude if NOT in C/C++ files
-        c_cpp_extensions = {'.c', '.cc', '.cpp', '.h'}
+        # Sources, headers and template implementations for C, C++, CUDA and Objective-C/C++
+        c_cpp_extensions = {
+            '.c', '.cc', '.cpp', '.cxx', '.c++',
+            '.h', '.hh', '.hpp', '.hxx', '.h++',
+            '.inl', '.ipp', '.tpp',
+            '.cu', '.cuh',
+            '.m', '.mm',
+        }
         file_ext = ''
         if '.' in file_path:
             file_ext = f".{file_path.lower().split('.')[-1]}"
