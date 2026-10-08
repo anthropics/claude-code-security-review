@@ -436,3 +436,65 @@ class TestHardExclusionRules:
             # Should be excluded since they're not C/C++ files
             assert reason is not None
             assert "Memory safety finding in non-C/C++ code" in reason
+
+class TestHardExclusionRulesDisclaimerContext:
+    """Disclaimer-aware reserved-word matching (PR regression tests).
+
+    Background: the stage-1 audit prompt's EXCLUSIONS instruction tells the
+    reviewing LLM not to report DoS / resource-exhaustion issues. For code
+    where a real finding shares a root cause with a resource issue, a
+    compliant LLM disclaims the resource aspect inside the same description
+    it uses to report the real vulnerability. A bare reserved-word match on
+    `title + description` then silently drops the real finding
+    (false negative at the hard-exclusion stage, before any LLM filtering).
+    """
+
+    def test_compliant_disclaimer_not_excluded(self):
+        finding = {
+            "title": "SQL injection via string-concatenated query",
+            "description": (
+                "User input is concatenated into the query text, allowing "
+                "arbitrary SQL injection. The same query also returns "
+                "unbounded rows, which could exhaust memory under load; per "
+                "instructions, this is not reported as a denial of service "
+                "issue - the security-relevant problem is the injection."
+            ),
+        }
+        reason = HardExclusionRules.get_exclusion_reason(finding)
+        assert reason is None
+
+    def test_genuine_dos_still_excluded(self):
+        finding = {
+            "title": "Potential Denial of Service",
+            "description": "This could lead to resource exhaustion",
+        }
+        reason = HardExclusionRules.get_exclusion_reason(finding)
+        assert reason is not None
+
+    def test_genuine_match_before_disclaimer_still_excluded(self):
+        # The reserved phrase appears first, as the finding's actual subject;
+        # a later disclaimer mention does not rescue it.
+        finding = {
+            "title": "Denial of Service",
+            "description": (
+                "A single request can exhaust CPU on the regex backtracking "
+                "path. (The related memory note is not reported as a separate "
+                "finding.)"
+            ),
+        }
+        reason = HardExclusionRules.get_exclusion_reason(finding)
+        assert reason is not None
+
+    def test_disclaimer_for_other_category_does_not_block_real_match(self):
+        # A disclaimer about a different word ("not reported as a rate
+        # limiting issue") must not rescue a genuine DoS phrase.
+        finding = {
+            "title": "Denial of Service via parser loop",
+            "description": (
+                "The parser spins forever when fed malformed input "
+                "(unbounded loop). Operators apply limits upstream; per "
+                "instructions, this is not reported as a rate limiting issue."
+            ),
+        }
+        reason = HardExclusionRules.get_exclusion_reason(finding)
+        assert reason is not None

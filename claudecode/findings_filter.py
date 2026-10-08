@@ -78,6 +78,41 @@ class HardExclusionRules:
         re.compile(r'\b(ssrf|server\s+.?side\s+.?request\s+.?forgery)\b', re.IGNORECASE),
     ]
     
+    # Words the stage-1 audit prompt's own EXCLUSIONS instruction can force a
+    # compliant reviewer to write inside a finding's text. When a reserved
+    # phrase appears next to one of these markers, it describes what the
+    # prompt told the reviewer NOT to report - not the finding itself - so it
+    # must not trigger a hard exclusion. (prompts.py, EXCLUSIONS: "Do NOT
+    # report ... Denial of Service ... resource exhaustion"; a compliant
+    # finding reads "...this is not reported as a denial of service
+    # issue...". Without this guard the two components contradict each
+    # other and real findings are silently dropped on trusted PRs.)
+    _DISCLAIMER_HINTS = [
+        "not reported as",
+        "not report",
+        "is not a",
+        "per instructions",
+        "out of scope",
+        "excluded from",
+    ]
+
+    @classmethod
+    def _matches_outside_disclaimer(cls, pattern: Pattern, text: str) -> bool:
+        """True when `pattern` matches `text` outside a disclaimer context.
+
+        A match counts as genuine only when none of `_DISCLAIMER_HINTS`
+        appears within 80 characters before or after it. A phrase the stage-1
+        prompt itself required the reviewer to write as a disclaimer ("this
+        is not reported as a denial of service issue") describes the
+        exclusion policy, not the finding, and must not trigger a drop.
+        """
+        for match in pattern.finditer(text):
+            before = text[max(0, match.start() - 80):match.start()]
+            after = text[match.end():match.end() + 80]
+            if not any(h in before or h in after for h in cls._DISCLAIMER_HINTS):
+                return True
+        return False
+
     @classmethod
     def get_exclusion_reason(cls, finding: Dict[str, Any]) -> Optional[str]:
         """Check if a finding should be excluded based on hard rules.
@@ -106,28 +141,28 @@ class HardExclusionRules:
         
         # Check DOS patterns
         for pattern in cls._DOS_PATTERNS:
-            if pattern.search(combined_text):
+            if cls._matches_outside_disclaimer(pattern, combined_text):
                 return "Generic DOS/resource exhaustion finding (low signal)"
         
         
         # Check rate limiting patterns  
         for pattern in cls._RATE_LIMITING_PATTERNS:
-            if pattern.search(combined_text):
+            if cls._matches_outside_disclaimer(pattern, combined_text):
                 return "Generic rate limiting recommendation"
         
         # Check resource patterns - always exclude
         for pattern in cls._RESOURCE_PATTERNS:
-            if pattern.search(combined_text):
+            if cls._matches_outside_disclaimer(pattern, combined_text):
                 return "Resource management finding (not a security vulnerability)"
         
         # Check open redirect patterns
         for pattern in cls._OPEN_REDIRECT_PATTERNS:
-            if pattern.search(combined_text):
+            if cls._matches_outside_disclaimer(pattern, combined_text):
                 return "Open redirect vulnerability (not high impact)"
             
         # Check regex injection patterns
         for pattern in cls._REGEX_INJECTION:
-            if pattern.search(combined_text):
+            if cls._matches_outside_disclaimer(pattern, combined_text):
                 return "Regex injection finding (not applicable)"
         
         # Check memory safety patterns - exclude if NOT in C/C++ files
@@ -139,7 +174,7 @@ class HardExclusionRules:
         # If file doesn't have a C/C++ extension (including no extension), exclude memory safety findings
         if file_ext not in c_cpp_extensions:
             for pattern in cls._MEMORY_SAFETY_PATTERNS:
-                if pattern.search(combined_text):
+                if cls._matches_outside_disclaimer(pattern, combined_text):
                     return "Memory safety finding in non-C/C++ code (not applicable)"
         
         # Check SSRF patterns - exclude if in HTML files only
@@ -148,7 +183,7 @@ class HardExclusionRules:
         # If file has HTML extension, exclude SSRF findings
         if file_ext in html_extensions:
             for pattern in cls._SSRF_PATTERNS:
-                if pattern.search(combined_text):
+                if cls._matches_outside_disclaimer(pattern, combined_text):
                     return "SSRF finding in HTML file (not applicable to client-side code)"
         
         return None
