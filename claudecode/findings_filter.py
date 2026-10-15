@@ -88,8 +88,11 @@ class HardExclusionRules:
         Returns:
             Exclusion reason if finding should be excluded, None otherwise
         """
-        # Check if finding is in a Markdown file
-        file_path = finding.get('file', '')
+        # Check if finding is in a Markdown file.
+        # `or ''` as well as the default: a finding can carry an explicit null
+        # file, and .lower() on it used to raise out through filter_findings
+        # and main()'s catch-all, discarding every other finding in the PR.
+        file_path = finding.get('file') or ''
         if file_path.lower().endswith('.md'):
             return "Finding in Markdown documentation file"
         
@@ -131,7 +134,15 @@ class HardExclusionRules:
                 return "Regex injection finding (not applicable)"
         
         # Check memory safety patterns - exclude if NOT in C/C++ files
-        c_cpp_extensions = {'.c', '.cc', '.cpp', '.h'}
+        # Every standard C/C++ source and header extension. A short list here
+        # is a false negative on the one language where memory safety findings
+        # are most often real: .hpp/.hh headers and .cxx sources were being
+        # dismissed as "non-C/C++ code".
+        c_cpp_extensions = {
+            '.c', '.cc', '.cpp', '.cxx', '.c++',
+            '.h', '.hh', '.hpp', '.hxx', '.h++',
+            '.inl', '.ipp', '.tcc',  # template implementation files
+        }
         file_ext = ''
         if '.' in file_path:
             file_ext = f".{file_path.lower().split('.')[-1]}"

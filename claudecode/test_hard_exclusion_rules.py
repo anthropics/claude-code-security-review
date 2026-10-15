@@ -436,3 +436,67 @@ class TestHardExclusionRules:
             # Should be excluded since they're not C/C++ files
             assert reason is not None
             assert "Memory safety finding in non-C/C++ code" in reason
+    def test_handles_a_null_file_path(self):
+        """A finding with file=None must not crash the whole audit.
+
+        `description` and `title` are already None-guarded here, and
+        _is_finding_in_excluded_directory treats a falsy path as "not
+        excluded", but this function called .lower() on the raw value. One
+        finding with a null file therefore raised AttributeError out through
+        filter_findings and main()'s catch-all, replacing the entire audit
+        output with an error and discarding every other finding in the PR -
+        including genuine high-severity ones.
+        """
+        finding = {
+            "title": "SQL Injection",
+            "description": "User input flows into a query unsanitized",
+            "file": None,
+        }
+
+        # Not excluded: a missing path is not evidence that this is a false
+        # positive, and the same finding with no 'file' key at all is kept.
+        assert HardExclusionRules.get_exclusion_reason(finding) is None
+
+    def test_null_file_path_still_applies_text_rules(self):
+        """A null file must not stop the text-based rules from being applied."""
+        finding = {
+            "title": "Denial of Service",
+            "description": "This could lead to resource exhaustion",
+            "file": None,
+        }
+
+        reason = HardExclusionRules.get_exclusion_reason(finding)
+        assert reason is not None
+        assert "DOS" in reason
+
+    def test_memory_safety_kept_in_all_c_cpp_extensions(self):
+        """Memory safety findings must survive in every standard C/C++ file.
+
+        The extension set listed only .c/.cc/.cpp/.h, so a buffer overflow in
+        a C++ header (.hpp/.hh) or an .cxx/.hxx source was reported as
+        "not applicable to non-C/C++ code" and dropped - a false negative on
+        exactly the language where memory safety findings are real.
+        """
+        c_cpp_files = [
+            "vuln.c", "vuln.cc", "vuln.cpp", "vuln.cxx", "vuln.c++",
+            "vuln.h", "vuln.hh", "vuln.hpp", "vuln.hxx", "vuln.h++",
+        ]
+
+        for file_path in c_cpp_files:
+            reason = HardExclusionRules.get_exclusion_reason({
+                "title": "Buffer overflow",
+                "description": "buffer overflow in memcpy call",
+                "file": file_path,
+            })
+            assert reason is None, f"{file_path} should keep memory safety findings, got: {reason}"
+
+    def test_memory_safety_still_excluded_in_non_c_files(self):
+        """The rule must keep excluding memory safety findings elsewhere."""
+        for file_path in ["app.py", "server.js", "main.go", "lib.rs", "Parser.java"]:
+            reason = HardExclusionRules.get_exclusion_reason({
+                "title": "Buffer overflow",
+                "description": "buffer overflow in memcpy call",
+                "file": file_path,
+            })
+            assert reason is not None
+            assert "Memory safety finding in non-C/C++ code" in reason
