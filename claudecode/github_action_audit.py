@@ -633,7 +633,11 @@ def main():
         print(json.dumps(output, indent=2))
         
         # Exit with appropriate code
-        high_severity_count = len([f for f in kept_findings if f.get('severity', '').upper() == 'HIGH'])
+        # `or ''`: a finding can carry an explicit null severity, and .upper()
+        # on it raised *after* the report above was printed - main()'s
+        # catch-all then stacked an error JSON on top of a finished report and
+        # exited 2, so a completed review looked like a configuration failure.
+        high_severity_count = len([f for f in kept_findings if (f.get('severity') or '').upper() == 'HIGH'])
         sys.exit(EXIT_GENERAL_ERROR if high_severity_count > 0 else EXIT_SUCCESS)
         
     except Exception as e:

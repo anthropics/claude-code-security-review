@@ -237,3 +237,55 @@ class TestJsonParser:
         
         # Should be able to extract the JSON
         assert result == {"nested": "json"}
+    def test_extract_json_with_unbalanced_brace_inside_a_string(self):
+        """A brace inside a string value must not end the object early.
+
+        Claude's findings quote source code, and a description that mentions a
+        lone '}' used to make the whole payload unextractable: the scanner
+        counted the in-string brace, closed the object early, failed to parse
+        the truncated candidate, and then went brace-negative so the real
+        closing brace never matched. The findings were reported as a parse
+        failure and silently dropped.
+        """
+        text = (
+            'Here are the results:\n'
+            '{"findings": [{"description": "the regex /}/ is unsafe", "severity": "high"}]}'
+        )
+        result = extract_json_from_text(text)
+
+        assert result == {
+            "findings": [{"description": "the regex /}/ is unsafe", "severity": "high"}]
+        }
+
+    def test_extract_json_with_unbalanced_open_brace_inside_a_string(self):
+        """The same, for a '{' in a string - e.g. a shell/JS interpolation snippet."""
+        text = 'Output:\n{"findings": [{"description": "uses ${USER} unquoted"}]}'
+        result = extract_json_from_text(text)
+
+        assert result == {"findings": [{"description": "uses ${USER} unquoted"}]}
+
+    def test_extract_json_with_escaped_quote_before_a_brace(self):
+        """An escaped quote must not be read as the end of the string."""
+        text = r'{"findings": [{"description": "he said \"}\" aloud"}]}'
+        result = extract_json_from_text(text)
+
+        assert result == {"findings": [{"description": 'he said "}" aloud'}]}
+
+    def test_extract_recovers_after_a_stray_closing_brace(self):
+        """A stray '}' in prose must not disable extraction for the rest of the text."""
+        text = 'oops } stray\n{"findings": []}'
+        result = extract_json_from_text(text)
+
+        assert result == {"findings": []}
+
+    def test_parse_reports_success_for_an_empty_object_in_prose(self):
+        """`{}` is valid JSON, so extracting it is a success, not a parse failure.
+
+        parse_json_with_fallbacks tested the extracted value for truthiness, so
+        an empty object - a legitimate "nothing to report" response - was
+        reported as invalid JSON.
+        """
+        success, result = parse_json_with_fallbacks("Here you go: {} (nothing found)")
+
+        assert success is True
+        assert result == {}

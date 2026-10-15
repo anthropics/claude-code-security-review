@@ -3,6 +3,7 @@
 Integration tests for full ClaudeCode workflow.
 """
 
+import contextlib
 import pytest
 import json
 import os
@@ -11,6 +12,26 @@ from unittest.mock import Mock, patch
 from pathlib import Path
 
 from claudecode.github_action_audit import main
+
+
+@contextlib.contextmanager
+def chdir_to_temp_dir():
+    """chdir into a fresh temp dir, and come back before it is removed.
+
+    These tests run main(), which resolves paths relative to the working
+    directory, so they need to be somewhere disposable. Restoring the original
+    cwd matters for two reasons: a test that leaves the process inside a
+    deleted directory breaks every later test that resolves a relative path,
+    and on Windows the removal itself fails, because a directory that is some
+    process's current directory cannot be deleted (WinError 32).
+    """
+    original_cwd = os.getcwd()
+    with tempfile.TemporaryDirectory() as tmpdir:
+        os.chdir(tmpdir)
+        try:
+            yield tmpdir
+        finally:
+            os.chdir(original_cwd)
 
 
 class TestFullWorkflowIntegration:
@@ -185,8 +206,7 @@ index 8901234..5678901 100644
         mock_run.side_effect = [version_result, audit_result, audit_result]
         
         # Run the workflow
-        with tempfile.TemporaryDirectory() as tmpdir:
-            os.chdir(tmpdir)
+        with chdir_to_temp_dir() as tmpdir:
             
             with patch.dict(os.environ, {
                 'GITHUB_REPOSITORY': 'company/app',
@@ -264,8 +284,7 @@ index 8901234..5678901 100644
             Mock(returncode=0, stdout=json.dumps({"findings": claude_findings}), stderr='')
         ]
         
-        with tempfile.TemporaryDirectory() as tmpdir:
-            os.chdir(tmpdir)
+        with chdir_to_temp_dir() as tmpdir:
             
             with patch.dict(os.environ, {
                 'GITHUB_REPOSITORY': 'company/app',
@@ -340,8 +359,7 @@ index 8901234..5678901 100644
             Mock(returncode=0, stdout='{"findings": [], "analysis_summary": {"review_completed": true}}', stderr='')
         ]
         
-        with tempfile.TemporaryDirectory() as tmpdir:
-            os.chdir(tmpdir)
+        with chdir_to_temp_dir() as tmpdir:
             
             output_file = Path(tmpdir) / 'output.json'
             
@@ -430,8 +448,7 @@ index 0000000..1234567
             Mock(returncode=0, stdout='{"findings": []}', stderr='')
         ]
         
-        with tempfile.TemporaryDirectory() as tmpdir:
-            os.chdir(tmpdir)
+        with chdir_to_temp_dir() as tmpdir:
             
             with patch.dict(os.environ, {
                 'GITHUB_REPOSITORY': 'company/app',
@@ -509,8 +526,7 @@ index 1234567..8901234 100644
             Mock(returncode=0, stdout='{"findings": []}', stderr='')
         ]
         
-        with tempfile.TemporaryDirectory() as tmpdir:
-            os.chdir(tmpdir)
+        with chdir_to_temp_dir() as tmpdir:
             
             with patch.dict(os.environ, {
                 'GITHUB_REPOSITORY': 'company/app',

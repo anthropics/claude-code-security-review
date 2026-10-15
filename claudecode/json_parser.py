@@ -34,28 +34,63 @@ def extract_json_from_text(text):
                     continue
         
         # If no JSON found in code blocks, try to find JSON objects anywhere in the text
-        # Find all potential JSON objects (looking for balanced braces)
-        brace_count = 0
-        json_start = -1
-        for i, char in enumerate(text):
-            if char == '{':
-                if brace_count == 0:
-                    json_start = i
-                brace_count += 1
-            elif char == '}':
-                brace_count -= 1
-                if brace_count == 0 and json_start != -1:
-                    # Found a complete JSON object
-                    potential_json = text[json_start:i+1]
-                    try:
-                        return json.loads(potential_json)
-                    except json.JSONDecodeError:
-                        # This wasn't valid JSON, continue looking
-                        continue
+        for potential_json in _iter_brace_delimited_objects(text):
+            try:
+                return json.loads(potential_json)
+            except json.JSONDecodeError:
+                # This wasn't valid JSON, continue looking
+                continue
     except Exception:
         pass
     
     return None
+
+
+def _iter_brace_delimited_objects(text):
+    """
+    Yield each top-level ``{...}`` span in `text`, outermost first.
+
+    Braces inside JSON string literals are ignored. Claude's findings quote
+    source code, so a description mentioning a lone ``}`` would otherwise close
+    the object early; the truncated candidate then failed to parse and the
+    counter went negative, so the real closing brace never matched and the
+    entire payload was reported as invalid JSON - silently dropping findings.
+
+    Args:
+        text: The text to scan
+
+    Yields:
+        str: Substrings that start with '{' and end with the matching '}'
+    """
+    brace_count = 0
+    json_start = -1
+    in_string = False
+    escaped = False
+
+    for i, char in enumerate(text):
+        if in_string:
+            if escaped:
+                escaped = False
+            elif char == '\\':
+                escaped = True
+            elif char == '"':
+                in_string = False
+            continue
+
+        if char == '"':
+            in_string = True
+        elif char == '{':
+            if brace_count == 0:
+                json_start = i
+            brace_count += 1
+        elif char == '}':
+            # Guarded so a stray '}' in prose can't drive the count negative
+            # and disable matching for the rest of the text.
+            if brace_count > 0:
+                brace_count -= 1
+                if brace_count == 0 and json_start != -1:
+                    yield text[json_start:i + 1]
+                    json_start = -1
 
 
 def parse_json_with_fallbacks(text, error_context=""):
@@ -76,8 +111,10 @@ def parse_json_with_fallbacks(text, error_context=""):
         pass
     
     # Try extracting JSON from text
+    # `is not None`, not truthiness: `{}` and `[]` are valid JSON and a
+    # legitimate "nothing to report" response, not a parse failure.
     extracted_json = extract_json_from_text(text)
-    if extracted_json:
+    if extracted_json is not None:
         return True, extracted_json
     
     # If all parsing failed, return error info

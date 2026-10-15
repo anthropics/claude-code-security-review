@@ -556,3 +556,61 @@ class TestAuditFailureModes:
             output = json.loads(captured.out)
             assert 'Security audit failed' in output['error']
             assert 'Claude execution failed' in output['error']
+
+    @patch('pathlib.Path.cwd')
+    @patch('claudecode.github_action_audit.get_security_audit_prompt')
+    @patch('claudecode.github_action_audit.FindingsFilter')
+    @patch('claudecode.github_action_audit.SimpleClaudeRunner')
+    @patch('claudecode.github_action_audit.GitHubActionClient')
+    def test_main_tolerates_a_finding_with_null_severity(self, mock_client_class, mock_runner_class,
+                                                         mock_filter_class, mock_prompt_func,
+                                                         mock_cwd, capsys):
+        """A finding with severity=None must not turn a completed audit into an error.
+
+        The high-severity count called .upper() on the raw value, so a null
+        severity raised AttributeError *after* the results JSON had already
+        been printed. main()'s catch-all then printed a second, error JSON on
+        top of it and exited 2, so the action reported a configuration error
+        for a review that had actually finished - with two JSON documents on
+        stdout for the caller to parse.
+        """
+        mock_client = Mock()
+        mock_client.get_pr_data.return_value = {'number': 7, 'title': 'PR', 'body': ''}
+        mock_client.get_pr_diff.return_value = "diff content"
+        mock_client._is_excluded.return_value = False
+        mock_client_class.return_value = mock_client
+
+        findings = [{'file': 'app.py', 'line': 1, 'severity': None, 'description': 'unclear severity'}]
+
+        mock_runner = Mock()
+        mock_runner.validate_claude_available.return_value = (True, "")
+        mock_runner.run_security_audit.return_value = (True, "", {'findings': findings, 'analysis_summary': {}})
+        mock_runner_class.return_value = mock_runner
+
+        mock_filter = Mock()
+        mock_filter.filter_findings.return_value = (
+            True,
+            {'filtered_findings': findings, 'excluded_findings': [], 'analysis_summary': {}},
+            Mock()
+        )
+        mock_filter_class.return_value = mock_filter
+
+        mock_prompt_func.return_value = "security prompt"
+        mock_cwd.return_value = Path('/tmp/repo')
+
+        with patch.dict(os.environ, {
+            'GITHUB_REPOSITORY': 'owner/repo',
+            'PR_NUMBER': '7',
+            'GITHUB_TOKEN': 'test-token'
+        }):
+            with pytest.raises(SystemExit) as exc_info:
+                main()
+
+            # A null severity isn't HIGH, so this is a clean run: exit 0.
+            assert exc_info.value.code == 0
+
+            captured = capsys.readouterr()
+            # Exactly one JSON document, and it's the report - not an error.
+            output = json.loads(captured.out)
+            assert 'error' not in output
+            assert len(output['findings']) == 1
