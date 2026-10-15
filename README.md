@@ -134,6 +134,23 @@ Follow the Quick Start guide above. The action handles all dependencies automati
 
 To run the security scanner locally against a specific PR, see the [evaluation framework documentation](claudecode/evals/README.md).
 
+### Platform Support
+
+This action is developed and tested on Linux. The table below separates what CI
+actually covers from what is merely expected to work:
+
+| Platform | Status | Notes |
+| --- | --- | --- |
+| **Linux** (`ubuntu-latest`, `ubuntu-24.04`) | Tested in CI | The configuration shown in the Quick Start guide above. Unit tests run on Python 3.10. |
+| **macOS** (`macos-latest`) | Expected to work, not covered by CI | Nothing here is known to be Linux-specific: paths go through `pathlib` and the Claude CLI is invoked with an argument list rather than a shell string. GitHub's macOS runners provide `bash`. Untested, so treat it as unsupported if you need a guarantee. |
+| **Windows** (`windows-latest`) | Not supported | Two blockers: every step in `action.yml` declares `shell: bash`, and the CLI is invoked as `claude` without a shell, which does not resolve the `claude.cmd` shim that `npm install -g` creates on Windows. |
+
+So running the action needs a Linux runner, or a macOS one at your own risk.
+Both Windows blockers are in how the action invokes things rather than in the
+analysis itself, so Windows support is a feature request rather than a bug -
+please open an issue if you need it.
+
+
 <a id="security-review-slash-command"></a>
 
 ## Claude Code Integration: /security-review Command 
