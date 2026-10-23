@@ -447,6 +447,12 @@ class EvaluationEngine:
                     return False, output, None, f"Exit code {result.returncode}: {error_output[:200]}"
                 return False, output, None, "Invalid JSON output"
             
+            # Audit failures also return JSON and may use exit code 1.
+            if isinstance(parsed_results, dict) and 'error' in parsed_results:
+                error_message = str(parsed_results['error'])
+                self.log(f"SAST audit failed: {error_message}")
+                return False, output, None, error_message
+
             # If we got valid JSON output, we consider it successful even with exit code 1
             # (exit code 1 means high-severity findings were found)
             if result.returncode not in [0, 1]:
