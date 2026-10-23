@@ -304,3 +304,66 @@ class TestHelperFunctions:
             
             assert result == mock_result
             mock_run.assert_called_once_with(case)
+
+
+class TestAuditErrorResults:
+    """Exercise audit result handling without invoking GitHub or Claude."""
+
+    @pytest.fixture
+    def engine(self, tmp_path, monkeypatch):
+        monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+        monkeypatch.setenv('GITHUB_TOKEN', 'test-token')
+        return EvaluationEngine(work_dir=str(tmp_path))
+
+    @pytest.mark.parametrize('returncode', [0, 1, 2])
+    def test_json_error_is_failure(self, engine, returncode):
+        error_message = 'Security audit failed: Claude Code execution timed out'
+        response = json.dumps({'error': error_message})
+        with patch('claudecode.evals.eval_engine.subprocess.run') as mock_run:
+            mock_run.return_value = Mock(
+                returncode=returncode, stdout=response, stderr=''
+            )
+            success, output, parsed, error = engine._run_sast_audit(
+                EvalCase('owner/repo', 123), engine.work_dir
+            )
+
+        assert success is False
+        assert output == response
+        assert parsed is None
+        assert error_message in error
+
+    @pytest.mark.parametrize('returncode, findings', [
+        (0, []),
+        (1, [{'file': 'app.py', 'line': 10, 'severity': 'HIGH'}]),
+    ])
+    def test_completed_audit_remains_successful(self, engine, returncode, findings):
+        response = json.dumps({'findings': findings})
+        with patch('claudecode.evals.eval_engine.subprocess.run') as mock_run:
+            mock_run.return_value = Mock(
+                returncode=returncode, stdout=response, stderr=''
+            )
+            success, output, parsed, error = engine._run_sast_audit(
+                EvalCase('owner/repo', 123), engine.work_dir
+            )
+
+        assert success is True
+        assert parsed['findings'] == findings
+        assert error is None
+
+    def test_failed_audit_propagates_to_evaluation(self, engine):
+        case = EvalCase('owner/repo', 123)
+        error_message = 'Failed to fetch PR data: request failed'
+        with patch.object(engine, '_setup_repository', return_value=(
+            True, engine.work_dir, ''
+        )), patch.object(engine, '_cleanup_worktree') as cleanup, patch(
+            'claudecode.evals.eval_engine.subprocess.run'
+        ) as mock_run:
+            mock_run.return_value = Mock(
+                returncode=1, stdout=json.dumps({'error': error_message}), stderr=''
+            )
+            result = engine.run_evaluation(case)
+
+        assert result.success is False
+        assert error_message in result.error_message
+        assert result.full_findings is None
+        cleanup.assert_called_once_with(case, engine.work_dir)
