@@ -26,6 +26,7 @@ from claudecode.constants import (
     SUBPROCESS_TIMEOUT
 )
 from claudecode.logger import get_logger
+from claudecode.path_utils import resolve_instruction_path
 
 logger = get_logger(__name__)
 
@@ -531,9 +532,12 @@ def main():
         # Load custom filtering instructions if provided
         custom_filtering_instructions = None
         filtering_file = os.environ.get('FALSE_POSITIVE_FILTERING_INSTRUCTIONS', '')
-        if filtering_file and Path(filtering_file).exists():
+        filtering_path = resolve_instruction_path(
+            filtering_file, os.environ.get('REPO_PATH', '')
+        )
+        if filtering_file and filtering_path.exists():
             try:
-                with open(filtering_file, 'r', encoding='utf-8') as f:
+                with open(filtering_path, 'r', encoding='utf-8') as f:
                     custom_filtering_instructions = f.read()
                     logger.info(f"Loaded custom filtering instructions from {filtering_file}")
             except Exception as e:
@@ -542,9 +546,12 @@ def main():
         # Load custom security scan instructions if provided
         custom_scan_instructions = None
         scan_file = os.environ.get('CUSTOM_SECURITY_SCAN_INSTRUCTIONS', '')
-        if scan_file and Path(scan_file).exists():
+        scan_path = resolve_instruction_path(
+            scan_file, os.environ.get('REPO_PATH', '')
+        )
+        if scan_file and scan_path.exists():
             try:
-                with open(scan_file, 'r', encoding='utf-8') as f:
+                with open(scan_path, 'r', encoding='utf-8') as f:
                     custom_scan_instructions = f.read()
                     logger.info(f"Loaded custom security scan instructions from {scan_file}")
             except Exception as e:
