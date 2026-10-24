@@ -64,8 +64,12 @@ runs:
       shell: bash
       run: |
         echo "::group::Install gh CLI"
-        # Install GitHub CLI for PR operations
-        sudo apt-get update && sudo apt-get install -y gh
+        # Install GitHub CLI for PR operations if not already available
+        if command -v gh >/dev/null 2>&1; then
+          echo "gh is already installed, skipping install"
+        else
+          sudo apt-get update && sudo apt-get install -y gh
+        fi
         echo "::endgroup::"
     
     - name: Set up Python
@@ -170,7 +174,11 @@ runs:
           pip install -r "$ACTION_PATH/claudecode/requirements.txt"
           npm install -g @anthropic-ai/claude-code
         fi
-        sudo apt-get update && sudo apt-get install -y jq
+        if command -v jq >/dev/null 2>&1; then
+          echo "jq is already installed, skipping install"
+        else
+          sudo apt-get update && sudo apt-get install -y jq
+        fi
         echo "::endgroup::"
     
     - name: Run ClaudeCode scan
