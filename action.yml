@@ -167,6 +167,7 @@ runs:
       run: |
         echo "::group::Install Deps"
         if [ "${{ steps.claudecode-check.outputs.enable_claudecode }}" == "true" ]; then
+          python -m pip install --upgrade 'pip>=26.2.2'
           pip install -r "$ACTION_PATH/claudecode/requirements.txt"
           npm install -g @anthropic-ai/claude-code
         fi
