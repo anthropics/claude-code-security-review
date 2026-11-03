@@ -1,6 +1,6 @@
 """Unit tests for HardExclusionRules in findings_filter module."""
 
-from claudecode.findings_filter import HardExclusionRules
+from copilot_review.findings_filter import HardExclusionRules
 
 
 class TestHardExclusionRules:

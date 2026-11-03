@@ -6,13 +6,13 @@ Unit tests for findings conversion and edge cases.
 import pytest
 import json
 
-from claudecode.findings_filter import FindingsFilter, HardExclusionRules
-from claudecode.json_parser import parse_json_with_fallbacks, extract_json_from_text
+from copilot_review.findings_filter import FindingsFilter, HardExclusionRules
+from copilot_review.json_parser import parse_json_with_fallbacks, extract_json_from_text
 
 
 def create_simple_filter():
     """Create a filter that only uses hard exclusions."""
-    return FindingsFilter(use_hard_exclusions=True, use_claude_filtering=False)
+    return FindingsFilter(use_hard_exclusions=True, use_llm_filtering=False)
 
 
 def filter_findings_simple(filter_instance, findings):

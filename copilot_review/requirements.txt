@@ -1,0 +1,8 @@
+# Requirements for copilot_review - GitLab MR security review with the GitHub Copilot CLI
+
+# GitLab REST API calls
+requests>=2.28.0
+
+# Test dependencies are installed separately (pytest).
+# The GitHub Copilot CLI must be installed separately (Node.js 22+):
+#   npm install -g @github/copilot

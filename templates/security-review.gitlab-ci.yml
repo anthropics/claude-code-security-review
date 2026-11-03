@@ -1,0 +1,55 @@
+# GitLab CI template: Copilot CLI security review for merge requests.
+#
+# Usage in a project's .gitlab-ci.yml:
+#
+#   include:
+#     - project: 'your-group/copliot-security-review'   # project that hosts this tool
+#       ref: main
+#       file: '/templates/security-review.gitlab-ci.yml'
+#
+#   variables:
+#     SECURITY_REVIEW_TOOL_REPO: 'your-group/copliot-security-review'
+#
+# Required CI/CD variables (Settings > CI/CD > Variables, masked, NOT protected because MR
+# pipelines of feature branches run on unprotected refs):
+#   COPILOT_GITHUB_TOKEN  Fine-grained token with the "Copilot Requests" permission
+#   GITLAB_TOKEN          Project access token with the "api" scope (CI_JOB_TOKEN cannot post MR notes)
+#
+# The job token of the project running the pipeline needs read access to the tool project
+# (tool project > Settings > CI/CD > Job token permissions).
+
+copilot-security-review:
+  stage: test
+  image: node:22-bookworm        # Copilot CLI requires Node.js 22 or later
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+  # Remove allow_failure if FAIL_ON_HIGH_SEVERITY should block the merge request.
+  allow_failure: true
+  variables:
+    SECURITY_REVIEW_TOOL_REF: "main"
+    SECURITY_REVIEW_TOOL_DIR: "/opt/copilot-security-review"
+    COPILOT_MODEL: "claude-sonnet-5.5"
+    ENABLE_LLM_FILTERING: "true"
+    RUN_EVERY_COMMIT: "false"          # false: review an MR once; true: review every new commit
+    FAIL_ON_HIGH_SEVERITY: "false"
+    DRY_RUN: "false"                   # true: run the review but post nothing
+    EXCLUDE_DIRECTORIES: ""            # e.g. "third_party,vendor,build"
+    CUSTOM_SECURITY_SCAN_INSTRUCTIONS: "/opt/copilot-security-review/examples/embedded-c-cpp-rust-java-scan-instructions.txt"
+  before_script:
+    - apt-get update -qq && apt-get install -y -qq --no-install-recommends python3 python3-requests git ca-certificates > /dev/null
+    - npm install -g @github/copilot
+    - copilot --version
+    - |
+      git clone --quiet --depth 1 --branch "$SECURITY_REVIEW_TOOL_REF" \
+        "https://gitlab-ci-token:${CI_JOB_TOKEN}@${CI_SERVER_HOST}/${SECURITY_REVIEW_TOOL_REPO}.git" \
+        "$SECURITY_REVIEW_TOOL_DIR"
+    # Do not leave the job token in the cloned repository's git config
+    - rm -rf "$SECURITY_REVIEW_TOOL_DIR/.git"
+  script:
+    - export PYTHONPATH="$SECURITY_REVIEW_TOOL_DIR"
+    - python3 -m copilot_review.audit
+  artifacts:
+    when: always
+    expire_in: 1 week
+    paths:
+      - copilot-review-results.json

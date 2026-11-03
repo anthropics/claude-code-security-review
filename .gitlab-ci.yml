@@ -1,0 +1,13 @@
+# CI for the copilot_review tool itself (unit tests).
+stages:
+  - test
+
+unit-tests:
+  stage: test
+  image: python:3.12
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+  script:
+    - pip install --quiet pytest requests
+    - python -m pytest copilot_review -q

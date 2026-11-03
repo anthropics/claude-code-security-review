@@ -1,54 +1,29 @@
-# Custom False Positive Filtering Instructions
+# 사용자 정의 오탐 필터링 규칙
 
-The Claude Code Security Reviewer Action supports custom false positive filtering instructions, allowing you to tailor the security analysis to your specific environment and requirements.
+`FALSE_POSITIVE_FILTERING_INSTRUCTIONS` 환경변수에 텍스트 파일 경로를 지정하면, copilot 2차 검토 프롬프트의
+기본 규칙(`copilot_review/copilot_filter_client.py`의 `DEFAULT_FILTERING_INSTRUCTIONS`)이 **파일 내용으로 교체**됩니다.
 
-## Overview
+## 구조
 
-By default, the SAST action includes a comprehensive set of exclusions and criteria for filtering out false positives. However, every organization has unique security requirements, technology stacks, and threat models. The `false-positive-filtering-instructions` input allows you to provide your own custom criteria.
+기본 규칙과 같은 구성을 권장합니다.
 
-## Usage
+```
+HARD EXCLUSIONS - Automatically exclude findings matching these patterns:
+1. ...
 
-1. Create a text file containing your custom filtering instructions (e.g., `.github/false-positive-filtering.txt`)
-2. Reference it in your workflow:
+SIGNAL QUALITY CRITERIA - For remaining findings, assess:
+1. ...
 
-```yaml
-- uses: anthropics/claude-code-security-review@main
-  with:
-    false-positive-filtering-instructions: .github/false-positive-filtering.txt
+PRECEDENTS -
+1. ...
 ```
 
-## File Format
+## 예시
 
-The file should contain plain text with three main sections:
+[`examples/custom-false-positive-filtering.txt`](../examples/custom-false-positive-filtering.txt) (원본 제공 예시, 조직 환경에 맞게 수정 필요)
 
-### 1. HARD EXCLUSIONS
-List patterns that should be automatically excluded from findings.
+## 참고
 
-### 2. SIGNAL QUALITY CRITERIA
-Questions to assess whether a finding represents a real vulnerability.
-
-### 3. PRECEDENTS
-Specific guidance for common security patterns in your environment.
-
-## Example
-
-See [examples/custom-false-positive-filtering.txt](../examples/custom-false-positive-filtering.txt) for a complete example tailored to a modern cloud-native application.
-
-## Default Instructions
-
-If no custom file is provided, the action uses default instructions tuned to work well for most applications.
-
-## Best Practices
-
-1. **Start with defaults**: Begin with the default instructions and modify based on false positives you encounter
-2. **Be specific**: Include details about your security architecture (e.g., "We use AWS Cognito for all authentication")
-3. **Document assumptions**: Explain why certain patterns are excluded (e.g., "k8s resource limits prevent DOS")
-4. **Version control**: Track changes to your filtering instructions alongside your code
-5. **Team review**: Have your security team review and approve the filtering instructions
-
-## Common Customizations
-
-- **Technology-specific exclusions**: Exclude findings that don't apply to your tech stack
-- **Infrastructure assumptions**: Document security controls at the infrastructure level
-- **Compliance requirements**: Adjust criteria based on your compliance needs
-- **Development practices**: Reflect your team's security practices and tooling
+- 하드 제외 규칙(`findings_filter.py`의 정규식)은 이 파일과 별개로 먼저 적용됩니다.
+- `ENABLE_LLM_FILTERING=false`이면 하드 규칙만 적용됩니다.
+- 모든 finding은 copilot 1회 호출로 함께 검토되며, 호출이 실패하면 finding을 모두 유지합니다.

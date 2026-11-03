@@ -1,103 +1,26 @@
-# Custom Security Scan Instructions
+# 사용자 정의 보안 점검 항목
 
-The Claude Code Security Reviewer Action supports custom security scan instructions, allowing you to add organization-specific vulnerability categories to the security audit.
+`CUSTOM_SECURITY_SCAN_INSTRUCTIONS` 환경변수에 텍스트 파일 경로를 지정하면, 기본 점검 항목(Data Exposure) 뒤에 파일 내용이 프롬프트로 추가됩니다.
+기본 항목은 그대로 유지되며, 동일한 HIGH/MEDIUM/LOW 기준이 적용됩니다.
 
-## Overview
+## 형식
 
-The default security scan covers common vulnerability categories like SQL injection, XSS, authentication issues, etc. However, organizations often have specific security concerns based on their:
-- Technology stack (GraphQL, gRPC, specific cloud providers)
-- Compliance requirements (GDPR, HIPAA, PCI DSS)
-- Industry-specific vulnerabilities (financial services, healthcare)
-- Custom frameworks and libraries
+```
+**카테고리 이름:**
+- 점검할 구체적인 취약점 또는 패턴
+- 또 다른 점검 항목
 
-The `custom-security-scan-instructions` input allows you to extend the security categories that Claude checks for.
-
-## Usage
-
-1. Create a text file containing your custom security categories (e.g., `.github/custom-security-categories.txt`)
-2. Reference it in your workflow:
-
-```yaml
-- uses: anthropics/claude-code-security-review@main
-  with:
-    custom-security-scan-instructions: .github/custom-security-categories.txt
+**다른 카테고리:**
+- ...
 ```
 
-## File Format
+## 예시
 
-The file should contain additional security categories in the same format as the default categories. Each category should:
-- Start with a descriptive header in bold (using `**Category Name:**`)
-- List specific vulnerabilities or patterns to check for
-- Use clear, actionable descriptions
+- 임베디드 / 차량(AVN, 텔레매틱스): [`examples/embedded-c-cpp-rust-java-scan-instructions.txt`](../examples/embedded-c-cpp-rust-java-scan-instructions.txt) (CI 템플릿의 기본값)
+- 산업별 예시(원본 제공): [`examples/custom-security-scan-instructions.txt`](../examples/custom-security-scan-instructions.txt)
 
-### Example Structure:
-```
-**Category Name:**
-- Specific vulnerability or pattern to check
-- Another specific issue to look for
-- Detailed description of what constitutes this vulnerability
+## 작성 팁
 
-**Another Category:**
-- More specific checks
-- Additional patterns to identify
-```
-
-## Examples
-
-### Industry-Specific Example
-See [examples/organization-specific-scan-instructions.txt](../examples/custom-security-scan-instructions.txt) for an example set of instructions that customize Claude Code to look for industry-specific security weaknesses including:
-- Compliance checks (GDPR, HIPAA, PCI DSS)
-- Financial services security
-- E-commerce specific issues
-
-## How It Works
-
-Your custom instructions are appended to the security audit prompt after the default "Data Exposure" category. This means:
-1. All default categories are still checked
-2. Your custom categories extend (not replace) the default scan
-3. The same HIGH/MEDIUM/LOW severity guidelines apply
-
-## Best Practices
-
-1. **Be Specific**: Provide clear descriptions of what constitutes each vulnerability
-2. **Include Context**: Explain why something is a vulnerability in your environment
-3. **Provide Examples**: Where possible, describe specific attack scenarios
-4. **Avoid Duplicates**: Check the default categories to avoid redundancy
-5. **Keep It Focused**: Only add categories relevant to your codebase
-
-## Default Categories Reference
-
-The default scan already includes:
-- Input Validation (SQL injection, command injection, XXE, etc.)
-- Authentication & Authorization
-- Crypto & Secrets Management
-- Injection & Code Execution
-- Data Exposure
-
-Your custom categories should complement these, not duplicate them.
-
-## Tips for Writing Effective Categories
-
-1. **Technology-Specific**: Add checks for your specific tech stack
-   ```
-   **GraphQL Security:**
-   - Query depth attacks allowing unbounded recursion
-   - Field-level authorization bypass
-   - Introspection data leakage in production
-   ```
-
-2. **Compliance-Focused**: Add regulatory requirements
-   ```
-   **GDPR Compliance:**
-   - Personal data processing without consent mechanisms
-   - Missing data retention limits
-   - Lack of data portability APIs
-   ```
-
-3. **Business Logic**: Add domain-specific vulnerabilities
-   ```
-   **Payment Processing:**
-   - Transaction replay vulnerabilities
-   - Currency conversion manipulation
-   - Refund process bypass
-   ```
+- 항목은 구체적으로, 코드에서 확인 가능한 패턴 위주로 작성합니다.
+- 조직의 위협 모델(공격자가 접근 가능한 인터페이스)을 명시하면 오탐이 줄어듭니다.
+- 기본 프롬프트의 EXCLUSIONS(DoS, 자원 고갈 등)와 충돌하는 항목은 `prompts.py`를 함께 조정해야 합니다.

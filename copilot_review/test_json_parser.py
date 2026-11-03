@@ -2,7 +2,7 @@
 
 import json
 from typing import Any, Dict
-from claudecode.json_parser import parse_json_with_fallbacks, extract_json_from_text
+from copilot_review.json_parser import parse_json_with_fallbacks, extract_json_from_text
 
 
 class TestJsonParser:

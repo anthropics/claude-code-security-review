@@ -1,9 +1,0 @@
-{
-  "name": "@anthropic-ai/sast-scripts",
-  "version": "1.0.0",
-  "description": "Scripts for Anthropic SAST Action",
-  "scripts": {
-    "test": "bun test",
-    "test:watch": "bun test --watch"
-  }
-}

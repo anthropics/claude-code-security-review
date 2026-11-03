@@ -1,0 +1,28 @@
+**Native Code Vulnerabilities (C/C++):**
+- Length, size or count fields taken from external messages and used in memcpy/memmove/array indexing/allocation without validation
+- Unbounded string functions (strcpy, strcat, sprintf, gets) on non-constant input; snprintf return value used as a length
+- Format strings controlled by external input (printf/syslog/logging macros)
+- Integer overflow, truncation or signed/unsigned confusion in size calculations before allocation or bounds checks
+- Unchecked return values of allocation, read/recv and parsing functions followed by use of NULL or uninitialized data
+- Use-after-free, double free and dangling pointers across callbacks, threads and asynchronous handlers; TOCTOU on shared buffers or files
+- Command injection through system(), popen() or exec*() with externally influenced arguments
+- Hand-written parsers (TLV, binary protocols, JSON/XML) that trust nested lengths or recursion depth from the input
+
+**Vehicle-Connected Interfaces (infotainment / telematics):**
+- Untrusted data from Bluetooth, Wi-Fi, USB, cellular/TCU, Ethernet/CAN gateways, diagnostic interfaces (for example UDS/DoIP), phone projection and update packages reaching parsers without validation
+- Missing authentication or authorization on diagnostic, remote-command or debug interfaces; debug or test modes left reachable in production builds
+- Missing signature or integrity verification of update packages, configuration or downloaded content; rollback/downgrade not prevented
+- Insecure IPC (D-Bus, Binder, sockets, shared memory) that exposes privileged operations to less privileged callers
+- Hardcoded credentials, keys or certificates; disabled TLS certificate or hostname validation; weak randomness for tokens and nonces
+- Excessive privileges: services running as root without need, world-writable files or sockets, setuid binaries
+
+**Rust:**
+- `unsafe` blocks that dereference raw pointers, use from_raw_parts, transmute or get_unchecked with externally influenced lengths or indices
+- FFI boundaries that accept unvalidated pointers or lengths from C/C++ callers, or mix allocators when freeing memory
+
+**Java (including Android/Automotive):**
+- JNI boundaries that pass externally influenced lengths or pointers to native code
+- Command injection through Runtime.exec/ProcessBuilder; path traversal using externally supplied file names
+- Exported Android components or intents without permission checks; WebView with JavaScript interfaces exposed to untrusted content
+- Unsafe deserialization (ObjectInputStream and similar) of externally supplied data
+- Secrets written to logs or insecure storage
