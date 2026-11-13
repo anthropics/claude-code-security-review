@@ -114,7 +114,7 @@ async function run() {
     });
     
     // Prepare review comments
-    const reviewComments = [];
+    let reviewComments = [];
     
     // Check if ClaudeCode comments should be silenced
     const silenceClaudeCodeComments = process.env.SILENCE_CLAUDECODE_COMMENTS === 'true';
@@ -173,20 +173,27 @@ async function run() {
       return;
     }
     
-    // Check for existing review comments to avoid duplicates
-    const comments = ghApi(`/repos/${context.repo.owner}/${context.repo.repo}/pulls/${context.issue.number}/comments`);
-    
-    // Check if we've already commented on these findings
-    const existingSecurityComments = comments.filter(comment => 
-      comment.user.type === 'Bot' && 
-      comment.body && comment.body.includes('🤖 **Security Issue:')
+    // Skip findings that already have a comment (same file and message), so
+    // findings from later commits are still posted
+    const comments = ghApi(`/repos/${context.repo.owner}/${context.repo.repo}/pulls/${context.issue.number}/comments?per_page=100`);
+    const headline = body => body.split('\n\n')[0];
+
+    const existing = new Set(
+      comments
+        .filter(comment => comment.user.type === 'Bot' && comment.body && comment.body.includes('🤖 **Security Issue:'))
+        .map(comment => `${comment.path}\n${headline(comment.body)}`)
     );
-    
-    if (existingSecurityComments.length > 0) {
-      console.log(`Found ${existingSecurityComments.length} existing security comments, skipping to avoid duplicates`);
+
+    const total = reviewComments.length;
+    reviewComments = reviewComments.filter(c => !existing.has(`${c.path}\n${headline(c.body)}`));
+
+    if (reviewComments.length < total) {
+      console.log(`Skipping ${total - reviewComments.length} finding(s) that already have a comment`);
+    }
+    if (reviewComments.length === 0) {
       return;
     }
-        
+
     try {
       // Create a review with all the comments
       const reviewData = {
