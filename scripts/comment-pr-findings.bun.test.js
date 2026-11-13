@@ -568,4 +568,73 @@ describe('comment-pr-findings.js', () => {
       expect(consoleLogSpy).toHaveBeenCalledWith('No findings to comment on PR diff');
     });
   });
+
+  describe('Duplicate Handling', () => {
+    const existingComment = (path, message) => ({
+      user: { type: 'Bot' },
+      path,
+      body: `🤖 **Security Issue: ${message}**\n\n**Severity:** HIGH\n`
+    });
+
+    async function run(findings, existingComments) {
+      readFileSyncSpy.mockImplementation((path) => {
+        if (path.includes('github-event.json')) {
+          return JSON.stringify({ pull_request: { number: 123, head: { sha: 'abc123' } } });
+        }
+        if (path === 'findings.json') {
+          return JSON.stringify(findings);
+        }
+      });
+
+      let posted = null;
+      spawnSyncSpy.mockImplementation((cmd, args, options) => {
+        const endpoint = args[1];
+        if (endpoint.includes('/pulls/123/files')) {
+          return { status: 0, stdout: JSON.stringify([{ filename: 'a.py' }, { filename: 'b.py' }]), stderr: '' };
+        }
+        if (endpoint.includes('/pulls/123/comments')) {
+          return { status: 0, stdout: JSON.stringify(existingComments), stderr: '' };
+        }
+        if (endpoint.includes('/pulls/123/reviews') && args.includes('POST')) {
+          posted = JSON.parse(options.input);
+        }
+        return { status: 0, stdout: '{}', stderr: '' };
+      });
+
+      await import('./comment-pr-findings.js');
+      return posted;
+    }
+
+    test('should post a new finding when an earlier scan already commented', async () => {
+      const posted = await run(
+        [{ file: 'b.py', line: 3, description: 'Command injection' }],
+        [existingComment('a.py', 'SQL injection')]
+      );
+
+      expect(posted.comments).toHaveLength(1);
+      expect(posted.comments[0].path).toBe('b.py');
+    });
+
+    test('should skip a finding that already has a comment', async () => {
+      const posted = await run(
+        [
+          { file: 'a.py', line: 1, description: 'SQL injection' },
+          { file: 'b.py', line: 3, description: 'Command injection' }
+        ],
+        [existingComment('a.py', 'SQL injection')]
+      );
+
+      expect(posted.comments).toHaveLength(1);
+      expect(posted.comments[0].path).toBe('b.py');
+    });
+
+    test('should not post when every finding already has a comment', async () => {
+      const posted = await run(
+        [{ file: 'a.py', line: 9, description: 'SQL injection' }],
+        [existingComment('a.py', 'SQL injection')]
+      );
+
+      expect(posted).toBeNull();
+    });
+  });
 });
